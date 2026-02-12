@@ -6,7 +6,7 @@ Enables semantic search across sheets with 500+ rows by:
 2. Storing in Chroma vector database
 3. Retrieving only relevant rows for AI queries
 
-Supports Google embeddings with local sentence-transformers fallback.
+Supports Google embeddings with OpenRouter API-based fallback.
 """
 
 import hashlib
@@ -48,19 +48,20 @@ def _get_google_embeddings():
     return _google_embeddings
 
 
-def _get_local_embeddings():
-    """Lazy load local sentence-transformers embeddings (fallback)."""
+def _get_openrouter_embeddings():
+    """Lazy load OpenAI-compatible embeddings via OpenRouter (fallback)."""
     global _local_embeddings
     if _local_embeddings is None:
         try:
-            from langchain_community.embeddings import HuggingFaceEmbeddings
-            _local_embeddings = HuggingFaceEmbeddings(
-                model_name="all-MiniLM-L6-v2",
-                model_kwargs={"device": "cpu"},
+            from langchain_openai import OpenAIEmbeddings
+            _local_embeddings = OpenAIEmbeddings(
+                model="openai/text-embedding-3-small",
+                openai_api_key=settings.OPENROUTER_API_KEY,
+                openai_api_base="https://openrouter.ai/api/v1",
             )
-            logger.info("Initialized local HuggingFace embeddings")
+            logger.info("Initialized OpenRouter embeddings (text-embedding-3-small)")
         except Exception as e:
-            logger.warning(f"Failed to initialize local embeddings: {e}")
+            logger.warning(f"Failed to initialize OpenRouter embeddings: {e}")
             return None
     return _local_embeddings
 
@@ -73,12 +74,13 @@ def _get_embeddings():
         if embeddings:
             return embeddings, "google"
 
-    # Fall back to local
-    embeddings = _get_local_embeddings()
-    if embeddings:
-        return embeddings, "local"
+    # Fall back to OpenRouter embeddings
+    if settings.OPENROUTER_API_KEY:
+        embeddings = _get_openrouter_embeddings()
+        if embeddings:
+            return embeddings, "openrouter"
 
-    raise RuntimeError("No embedding model available. Install sentence-transformers or provide GEMINI_API_KEY.")
+    raise RuntimeError("No embedding model available. Provide GEMINI_API_KEY or OPENROUTER_API_KEY.")
 
 
 # ---------------------------------------------------------------------------
