@@ -20,18 +20,18 @@ email-validator>=2.0.0
 # AI (OpenRouter via OpenAI-compatible client)
 openai>=1.58.1,<2.0.0
 
-# LangChain (Agent framework)
-langchain>=0.3.0
-langchain-openai>=0.3.0
-langchain-google-genai>=2.0.0
-langchain-community>=0.3.0
+# LangChain (Agent framework) — pin to 0.3.x to avoid backtracking
+langchain>=0.3.0,<1.0.0
+langchain-openai>=0.3.0,<1.0.0
+langchain-google-genai>=2.0.0,<3.0.0
+langchain-community>=0.3.0,<1.0.0
 
 # RAG (Vector search)
-chromadb>=0.5.0
-sentence-transformers>=3.0.0
+chromadb>=0.5.0,<1.0.0
+sentence-transformers>=3.0.0,<4.0.0
 
 # Payments
-dodopayments>=1.66.0
+dodopayments>=1.66.0,<2.0.0
 
 # API Analytics
 api-analytics[fastapi]>=1.2.0
