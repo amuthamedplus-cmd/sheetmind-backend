@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SheetMind API Latency Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 24px; }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  .subtitle { color: #94a3b8; font-size: 0.85rem; margin-bottom: 20px; }
+  .config-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .config-bar label { font-size: 0.8rem; color: #94a3b8; }
+  .config-bar input { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; padding: 6px 10px; border-radius: 6px; width: 240px; font-size: 0.85rem; }
+  .config-bar select { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; padding: 6px 10px; border-radius: 6px; font-size: 0.85rem; }
+  .btn { padding: 8px 20px; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer; font-weight: 600; transition: all 0.15s; }
+  .btn-primary { background: #4f46e5; color: white; }
+  .btn-primary:hover { background: #4338ca; }
+  .btn-primary:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+  .btn-danger { background: #dc2626; color: white; }
+  .btn-secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: #1e293b; border-radius: 10px; padding: 16px; border: 1px solid #334155; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .card-title { font-weight: 600; font-size: 0.95rem; }
+  .method { font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+  .method-get { background: #065f46; color: #6ee7b7; }
+  .method-post { background: #92400e; color: #fcd34d; }
+  .endpoint { font-size: 0.75rem; color: #64748b; font-family: monospace; margin-bottom: 12px; }
+
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+  .metric { text-align: center; }
+  .metric-value { font-size: 1.1rem; font-weight: 700; }
+  .metric-label { font-size: 0.65rem; color: #64748b; text-transform: uppercase; }
+
+  .status-badge { font-size: 0.7rem; padding: 2px 10px; border-radius: 12px; font-weight: 600; }
+  .status-idle { background: #334155; color: #94a3b8; }
+  .status-running { background: #1e3a5f; color: #60a5fa; animation: pulse 1s infinite; }
+  .status-pass { background: #064e3b; color: #6ee7b7; }
+  .status-fail { background: #7f1d1d; color: #fca5a5; }
+  .status-slow { background: #78350f; color: #fcd34d; }
+
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+  .latency-bar-bg { height: 6px; background: #334155; border-radius: 3px; overflow: hidden; margin-bottom: 4px; }
+  .latency-bar { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+  .bar-green { background: #10b981; }
+  .bar-yellow { background: #f59e0b; }
+  .bar-red { background: #ef4444; }
+
+  .history { display: flex; gap: 2px; align-items: end; height: 40px; margin-top: 8px; }
+  .history-bar { flex: 1; min-width: 4px; max-width: 12px; border-radius: 2px 2px 0 0; transition: height 0.2s; cursor: pointer; position: relative; }
+  .history-bar:hover::after { content: attr(data-ms); position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font-size: 0.65rem; background: #0f172a; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+
+  .summary-bar { display: flex; gap: 24px; margin-bottom: 20px; flex-wrap: wrap; }
+  .summary-stat { text-align: center; }
+  .summary-stat .metric-value { font-size: 1.4rem; }
+
+  .log-panel { background: #1e293b; border-radius: 10px; padding: 16px; border: 1px solid #334155; max-height: 300px; overflow-y: auto; margin-top: 16px; }
+  .log-panel h3 { font-size: 0.85rem; margin-bottom: 8px; color: #94a3b8; }
+  .log-entry { font-family: monospace; font-size: 0.75rem; padding: 3px 0; border-bottom: 1px solid #1e293b; }
+  .log-time { color: #64748b; }
+  .log-pass { color: #6ee7b7; }
+  .log-fail { color: #fca5a5; }
+  .log-warn { color: #fcd34d; }
+
+  .toggle-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .toggle-btn { font-size: 0.75rem; padding: 4px 12px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: #94a3b8; cursor: pointer; }
+  .toggle-btn.active { border-color: #4f46e5; color: #a5b4fc; background: #1e1b4b; }
+</style>
+</head>
+<body>
+
+<h1>SheetMind API Latency Dashboard</h1>
+<p class="subtitle">Real-time endpoint performance testing</p>
+
+<div class="config-bar">
+  <div>
+    <label>Base URL</label><br>
+    <input id="baseUrl" value="http://localhost:8000" />
+  </div>
+  <div>
+    <label>Iterations</label><br>
+    <select id="iterations">
+      <option value="1">1</option>
+      <option value="3" selected>3</option>
+      <option value="5">5</option>
+      <option value="10">10</option>
+    </select>
+  </div>
+  <div style="align-self: end;">
+    <button class="btn btn-primary" id="runAll" onclick="runAllTests()">Run All Tests</button>
+    <button class="btn btn-secondary" onclick="clearResults()">Clear</button>
+  </div>
+</div>
+
+<div class="toggle-row" id="toggleRow"></div>
+
+<div class="summary-bar" id="summaryBar">
+  <div class="summary-stat"><div class="metric-value" id="totalTests">0</div><div class="metric-label">Total Calls</div></div>
+  <div class="summary-stat"><div class="metric-value" id="avgLatency">--</div><div class="metric-label">Avg Latency</div></div>
+  <div class="summary-stat"><div class="metric-value" id="passRate">--</div><div class="metric-label">Pass Rate</div></div>
+  <div class="summary-stat"><div class="metric-value" id="slowest">--</div><div class="metric-label">Slowest</div></div>
+</div>
+
+<div class="grid" id="cardGrid"></div>
+
+<div class="log-panel">
+  <h3>Request Log</h3>
+  <div id="logArea"></div>
+</div>
+
+<script>
+const ENDPOINTS = [
+  {
+    id: "health",
+    name: "Health Check",
+    method: "GET",
+    path: "/api/health",
+    body: null,
+    expect: 200,
+  },
+  {
+    id: "chat",
+    name: "Chat Query",
+    method: "POST",
+    path: "/api/chat/query",
+    body: {
+      message: "What is 2+2?",
+      sheet_data: {
+        dataRange: "A1:B3",
+        cells: { A1: "Name", B1: "Value", A2: "Test", B2: "42", A3: "Demo", B3: "100" },
+      },
+      sheet_name: "Sheet1",
+    },
+    expect: 200,
+  },
+  {
+    id: "chart",
+    name: "Chart Generation",
+    method: "POST",
+    path: "/api/chat/chart",
+    body: {
+      data: {
+        headers: ["Month", "Sales"],
+        rows: [["Jan", 100], ["Feb", 150], ["Mar", 200], ["Apr", 180]],
+      },
+      chart_type: "bar",
+      title: "Monthly Sales",
+    },
+    expect: 200,
+  },
+  {
+    id: "formula_explain",
+    name: "Formula Explain",
+    method: "POST",
+    path: "/api/formula/explain",
+    body: {
+      formula: "=SUM(A1:A10)",
+      mode: "standard",
+    },
+    expect: 200,
+  },
+  {
+    id: "formula_explain_steps",
+    name: "Formula Explain (Steps)",
+    method: "POST",
+    path: "/api/formula/explain",
+    body: {
+      formula: "=IF(VLOOKUP(A2,B:C,2,FALSE)>100,\"High\",\"Low\")",
+      mode: "step_by_step",
+    },
+    expect: 200,
+  },
+  {
+    id: "formula_fix",
+    name: "Formula Fix",
+    method: "POST",
+    path: "/api/formula/fix",
+    body: {
+      formula: "=VLOOKUP(A1,B:C,5,FALSE)",
+      error_message: "#REF! error",
+    },
+    expect: 200,
+  },
+  {
+    id: "formula_exec",
+    name: "Formula Execute",
+    method: "POST",
+    path: "/api/formula/execute",
+    body: {
+      prompt: "Categorize this as High or Low",
+      range_data: [["Sales", 500], ["Revenue", 30]],
+    },
+    expect: 200,
+  },
+  {
+    id: "usage",
+    name: "Usage Stats",
+    method: "GET",
+    path: "/api/usage/stats",
+    body: null,
+    expect: [200, 401],
+  },
+];
+
+// State
+const results = {};
+ENDPOINTS.forEach(ep => {
+  results[ep.id] = { latencies: [], status: "idle", lastCode: null, lastError: null };
+});
+let running = false;
+let enabledTests = new Set(ENDPOINTS.map(e => e.id));
+
+// Build toggle buttons
+function buildToggles() {
+  const row = document.getElementById("toggleRow");
+  row.innerHTML = "";
+  ENDPOINTS.forEach(ep => {
+    const btn = document.createElement("button");
+    btn.className = "toggle-btn" + (enabledTests.has(ep.id) ? " active" : "");
+    btn.textContent = ep.name;
+    btn.onclick = () => {
+      if (enabledTests.has(ep.id)) enabledTests.delete(ep.id);
+      else enabledTests.add(ep.id);
+      btn.classList.toggle("active");
+    };
+    row.appendChild(btn);
+  });
+}
+
+// Build cards
+function buildCards() {
+  const grid = document.getElementById("cardGrid");
+  grid.innerHTML = "";
+  ENDPOINTS.forEach(ep => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.id = `card-${ep.id}`;
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">${ep.name}</span>
+        <span class="status-badge status-idle" id="status-${ep.id}">IDLE</span>
+      </div>
+      <div class="endpoint"><span class="method method-${ep.method.toLowerCase()}">${ep.method}</span> ${ep.path}</div>
+      <div class="metrics">
+        <div class="metric"><div class="metric-value" id="last-${ep.id}">--</div><div class="metric-label">Last</div></div>
+        <div class="metric"><div class="metric-value" id="avg-${ep.id}">--</div><div class="metric-label">Avg</div></div>
+        <div class="metric"><div class="metric-value" id="min-${ep.id}">--</div><div class="metric-label">Min</div></div>
+        <div class="metric"><div class="metric-value" id="max-${ep.id}">--</div><div class="metric-label">Max</div></div>
+      </div>
+      <div class="latency-bar-bg"><div class="latency-bar bar-green" id="bar-${ep.id}" style="width:0%"></div></div>
+      <div class="history" id="hist-${ep.id}"></div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function setStatus(id, status, text) {
+  const el = document.getElementById(`status-${id}`);
+  el.className = `status-badge status-${status}`;
+  el.textContent = text || status.toUpperCase();
+}
+
+function updateMetrics(id) {
+  const r = results[id];
+  const lats = r.latencies;
+  if (!lats.length) return;
+
+  const last = lats[lats.length - 1];
+  const avg = Math.round(lats.reduce((a, b) => a + b, 0) / lats.length);
+  const min = Math.min(...lats);
+  const max = Math.max(...lats);
+
+  document.getElementById(`last-${id}`).textContent = `${last}ms`;
+  document.getElementById(`avg-${id}`).textContent = `${avg}ms`;
+  document.getElementById(`min-${id}`).textContent = `${min}ms`;
+  document.getElementById(`max-${id}`).textContent = `${max}ms`;
+
+  // Latency bar (scale: 0-5000ms)
+  const pct = Math.min(100, (avg / 5000) * 100);
+  const bar = document.getElementById(`bar-${id}`);
+  bar.style.width = pct + "%";
+  bar.className = `latency-bar ${avg < 1000 ? "bar-green" : avg < 3000 ? "bar-yellow" : "bar-red"}`;
+
+  // Color the metric values
+  const lastEl = document.getElementById(`last-${id}`);
+  lastEl.style.color = last < 1000 ? "#6ee7b7" : last < 3000 ? "#fcd34d" : "#fca5a5";
+
+  // History bars
+  const hist = document.getElementById(`hist-${id}`);
+  hist.innerHTML = "";
+  const maxH = Math.max(...lats, 1);
+  lats.slice(-20).forEach(l => {
+    const div = document.createElement("div");
+    const h = Math.max(4, (l / Math.max(maxH, 100)) * 40);
+    div.className = "history-bar";
+    div.style.height = h + "px";
+    div.style.background = l < 1000 ? "#10b981" : l < 3000 ? "#f59e0b" : "#ef4444";
+    div.setAttribute("data-ms", l + "ms");
+    hist.appendChild(div);
+  });
+}
+
+function updateSummary() {
+  const allLats = Object.values(results).flatMap(r => r.latencies);
+  const totalCalls = allLats.length;
+  const totalPass = Object.values(results).filter(r => r.status === "pass").length;
+  const totalRun = Object.values(results).filter(r => r.status !== "idle").length;
+
+  document.getElementById("totalTests").textContent = totalCalls;
+  document.getElementById("avgLatency").textContent = totalCalls ? Math.round(allLats.reduce((a, b) => a + b, 0) / totalCalls) + "ms" : "--";
+  document.getElementById("passRate").textContent = totalRun ? Math.round((totalPass / totalRun) * 100) + "%" : "--";
+  document.getElementById("slowest").textContent = totalCalls ? Math.max(...allLats) + "ms" : "--";
+}
+
+function addLog(msg, type = "pass") {
+  const log = document.getElementById("logArea");
+  const entry = document.createElement("div");
+  entry.className = "log-entry";
+  const time = new Date().toLocaleTimeString();
+  entry.innerHTML = `<span class="log-time">${time}</span> <span class="log-${type}">${msg}</span>`;
+  log.prepend(entry);
+  // Keep only last 100 entries
+  while (log.children.length > 100) log.removeChild(log.lastChild);
+}
+
+async function testEndpoint(ep) {
+  const base = document.getElementById("baseUrl").value.replace(/\/+$/, "");
+  const url = base + ep.path;
+
+  setStatus(ep.id, "running", "TESTING");
+
+  const opts = { method: ep.method, headers: {} };
+  if (ep.body) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(ep.body);
+  }
+
+  const t0 = performance.now();
+  try {
+    const res = await fetch(url, opts);
+    const latency = Math.round(performance.now() - t0);
+    const expectedCodes = Array.isArray(ep.expect) ? ep.expect : [ep.expect];
+
+    results[ep.id].latencies.push(latency);
+    results[ep.id].lastCode = res.status;
+
+    let responseBody;
+    try { responseBody = await res.json(); } catch { responseBody = null; }
+
+    if (expectedCodes.includes(res.status)) {
+      results[ep.id].status = latency > 3000 ? "slow" : "pass";
+      setStatus(ep.id, results[ep.id].status, latency > 3000 ? `SLOW ${latency}ms` : `${res.status} OK`);
+      addLog(`${ep.method} ${ep.path} -> ${res.status} (${latency}ms)`, latency > 3000 ? "warn" : "pass");
+    } else {
+      results[ep.id].status = "fail";
+      const errMsg = responseBody?.detail || res.statusText;
+      results[ep.id].lastError = errMsg;
+      setStatus(ep.id, "fail", `${res.status} FAIL`);
+      addLog(`${ep.method} ${ep.path} -> ${res.status} ${errMsg} (${latency}ms)`, "fail");
+    }
+
+    updateMetrics(ep.id);
+  } catch (err) {
+    const latency = Math.round(performance.now() - t0);
+    results[ep.id].status = "fail";
+    results[ep.id].lastError = err.message;
+    results[ep.id].latencies.push(latency);
+    setStatus(ep.id, "fail", "ERROR");
+    addLog(`${ep.method} ${ep.path} -> NETWORK ERROR: ${err.message} (${latency}ms)`, "fail");
+    updateMetrics(ep.id);
+  }
+}
+
+async function runAllTests() {
+  if (running) return;
+  running = true;
+  const btn = document.getElementById("runAll");
+  btn.disabled = true;
+  btn.textContent = "Running...";
+
+  const iterations = parseInt(document.getElementById("iterations").value);
+  const activeEndpoints = ENDPOINTS.filter(ep => enabledTests.has(ep.id));
+
+  addLog(`--- Starting ${iterations} iteration(s) for ${activeEndpoints.length} endpoint(s) ---`, "warn");
+
+  for (let i = 0; i < iterations; i++) {
+    if (iterations > 1) addLog(`Iteration ${i + 1}/${iterations}`, "warn");
+    for (const ep of activeEndpoints) {
+      await testEndpoint(ep);
+      updateSummary();
+    }
+  }
+
+  addLog("--- All tests complete ---", "pass");
+  btn.disabled = false;
+  btn.textContent = "Run All Tests";
+  running = false;
+}
+
+function clearResults() {
+  ENDPOINTS.forEach(ep => {
+    results[ep.id] = { latencies: [], status: "idle", lastCode: null, lastError: null };
+    setStatus(ep.id, "idle", "IDLE");
+    document.getElementById(`last-${ep.id}`).textContent = "--";
+    document.getElementById(`avg-${ep.id}`).textContent = "--";
+    document.getElementById(`min-${ep.id}`).textContent = "--";
+    document.getElementById(`max-${ep.id}`).textContent = "--";
+    document.getElementById(`bar-${ep.id}`).style.width = "0%";
+    document.getElementById(`hist-${ep.id}`).innerHTML = "";
+  });
+  document.getElementById("logArea").innerHTML = "";
+  document.getElementById("totalTests").textContent = "0";
+  document.getElementById("avgLatency").textContent = "--";
+  document.getElementById("passRate").textContent = "--";
+  document.getElementById("slowest").textContent = "--";
+}
+
+// Init
+buildToggles();
+buildCards();
+</script>
+</body>
+</html>
