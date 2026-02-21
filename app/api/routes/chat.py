@@ -4,7 +4,7 @@ import re
 import uuid
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 
@@ -19,7 +19,7 @@ from app.schemas.message import (
 from app.services.ai_provider import chat_completion, agent_completion
 from app.services.chart_generator import generate_chart
 from app.services.source_linker import extract_sources
-from app.services.usage import check_limit, increment_usage
+from app.services.usage import check_limit, increment_usage, check_and_increment
 from app.services.rate_limiter import check_rate_limit
 from app.services.cache import get_cached, set_cached
 from app.services.profiler import StepTimer
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
-_bg_executor = ThreadPoolExecutor(max_workers=4)
+_bg_executor = ThreadPoolExecutor(max_workers=settings.THREAD_POOL_SIZE)
 
 # LangChain imports (lazy loaded based on feature flag)
 _langchain_available = False
@@ -81,7 +81,17 @@ _AGENT_INTENT_PATTERN = re.compile(
     r"\w+\s+wise\b|"
     # Short "verb by X" patterns
     r"sum\s+by\s+|count\s+by\s+|average\s+by\s+|avg\s+by\s+|"
-    r"total\s+by\s+|mean\s+by\s+)\b",
+    r"total\s+by\s+|mean\s+by\s+|"
+    # Top/bottom/sort/rank patterns
+    r"top\s+\d+|bottom\s+\d+|"
+    r"sort\s+(by|the)|sort\s+\w+\s+(asc|desc|ascending|descending)|"
+    r"highest\s+\d+|lowest\s+\d+|"
+    r"rank\s+by|ranking|"
+    r"best\s+\d+|worst\s+\d+|"
+    r"largest\s+\d+|smallest\s+\d+|"
+    r"show\s+(me\s+)?(the\s+)?top\s+|show\s+(me\s+)?(the\s+)?bottom\s+|"
+    r"sort\s+descending|sort\s+ascending|"
+    r"order\s+by|arrange\s+by)\b",
     re.IGNORECASE,
 )
 
@@ -256,6 +266,16 @@ def _persist_chat(
 ):
     """Save conversation, user msg, and assistant msg to DB (runs in background)."""
     try:
+        # Verify conversation exists and belongs to this user before inserting
+        conv = sb.table("conversations") \
+            .select("id") \
+            .eq("id", conversation_id) \
+            .eq("user_id", user_id) \
+            .execute()
+        if not conv.data:
+            logger.error(f"Persist skipped: conversation {conversation_id} not found for user {user_id}")
+            return
+
         sb.table("messages").insert({
             "conversation_id": conversation_id,
             "role": "user",
@@ -270,10 +290,9 @@ def _persist_chat(
         }).execute()
         # Touch updated_at so conversation list sorts by most recent activity
         sb.table("conversations") \
-            .update({"updated_at": datetime.utcnow().isoformat()}) \
+            .update({"updated_at": datetime.now(timezone.utc).isoformat()}) \
             .eq("id", conversation_id) \
             .execute()
-        increment_usage(user_id, "chat_count")
     except Exception as exc:
         logger.error(f"Background DB persist failed: {exc}")
 
@@ -305,12 +324,18 @@ async def chat_query(
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Please slow down.",
-            headers={"Retry-After": str(rate["retry_after"] or 60)},
+            headers={
+                "Retry-After": str(rate["retry_after"] or 60),
+                "RateLimit-Limit": str(rate["limit"]),
+                "RateLimit-Remaining": "0",
+            },
         )
     timer.stop("rate_limit")
 
     timer.start("usage_check")
-    check_limit(user_id, tier)
+    # Atomically check limit AND increment usage counter before the AI call.
+    # This prevents concurrent requests from bypassing the quota.
+    check_and_increment(user_id, tier, "chat_count")
     timer.stop("usage_check")
 
     # Check cache before calling AI (skip if force_refresh or continuing a conversation)
@@ -325,7 +350,7 @@ async def chat_query(
         )
     timer.stop("cache_lookup")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     # Create conversation (in background if new) and kick off chart concurrently
     timer.start("conv_create")
@@ -546,7 +571,8 @@ async def chat_query(
                     sources = extract_sources(ai_response, default_sheet)
                     sources_json = [s.model_dump() for s in sources]
                 except RuntimeError as e2:
-                    raise HTTPException(status_code=503, detail=str(e2))
+                    logger.error(f"AI fallback also failed: {e2}")
+                    raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again.")
 
         timer.stop("ai_call")
 
@@ -564,7 +590,8 @@ async def chat_query(
                 ),
             )
         except RuntimeError as e:
-            raise HTTPException(status_code=503, detail=str(e))
+            logger.error(f"AI provider error: {e}")
+            raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again.")
         timer.stop("ai_call")
 
         if agent_result and "steps" in agent_result:
@@ -593,7 +620,8 @@ async def chat_query(
                     history=history,
                 )
             except RuntimeError as e:
-                raise HTTPException(status_code=503, detail=str(e))
+                logger.error(f"AI provider error: {e}")
+                raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again.")
 
             default_sheet = effective_sheet_name or "Sheet1"
             sources = extract_sources(ai_response, default_sheet)
@@ -609,7 +637,8 @@ async def chat_query(
                 history=history,
             )
         except RuntimeError as e:
-            raise HTTPException(status_code=503, detail=str(e))
+            logger.error(f"AI provider error: {e}")
+            raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again.")
         timer.stop("ai_call")
 
         timer.start("source_extraction")
@@ -634,7 +663,14 @@ async def chat_query(
     # Resolve conversation_id if created in background
     if conv_future:
         timer.start("conv_await")
-        conversation_id = await conv_future
+        try:
+            conversation_id = await asyncio.wait_for(conv_future, timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.error("Conversation creation timed out after 5s")
+            raise HTTPException(status_code=503, detail="Service temporarily slow. Please try again.")
+        except Exception as e:
+            logger.error(f"Conversation creation failed: {e}")
+            raise HTTPException(status_code=503, detail="Failed to start conversation. Please try again.")
         timer.stop("conv_await")
 
     # Generate a message ID client-side so we don't wait for the DB insert
@@ -713,6 +749,8 @@ async def chat_query(
 async def chat_history(
     user: dict = Depends(get_current_user),
     conversation_id: str | None = None,
+    limit: int = Query(20, ge=1, le=100, description="Max conversations to return"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
 ):
     """Get conversation history."""
     sb = get_supabase()
@@ -729,26 +767,30 @@ async def chat_history(
         if not conv.data:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-        # Return messages for a specific conversation
+        # Return messages for a specific conversation (capped to prevent huge payloads)
         result = sb.table("messages") \
             .select("*") \
             .eq("conversation_id", conversation_id) \
             .order("created_at") \
+            .limit(500) \
             .execute()
 
         return {"messages": result.data}
     else:
-        # Return list of conversations
-        result = sb.table("conversations") \
-            .select("*") \
+        # Return paginated list of conversations
+        query = sb.table("conversations") \
+            .select("*", count="exact") \
             .eq("user_id", user_id) \
             .order("updated_at", desc=True) \
-            .limit(20) \
-            .execute()
+            .range(offset, offset + limit - 1)
+
+        result = query.execute()
 
         return {
             "conversations": result.data,
-            "total": len(result.data),
+            "total": result.count if result.count is not None else len(result.data),
+            "limit": limit,
+            "offset": offset,
         }
 
 
@@ -758,6 +800,12 @@ async def delete_conversation(
     user: dict = Depends(get_current_user),
 ):
     """Delete a conversation and all its messages."""
+    # Validate UUID format to avoid passing arbitrary strings to DB queries
+    try:
+        uuid.UUID(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid conversation ID format")
+
     sb = get_supabase()
 
     # Verify ownership
@@ -771,10 +819,14 @@ async def delete_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     # Messages cascade-delete automatically
-    sb.table("conversations") \
+    delete_result = sb.table("conversations") \
         .delete() \
         .eq("id", conversation_id) \
+        .eq("user_id", user["id"]) \
         .execute()
+
+    if not delete_result.data:
+        raise HTTPException(status_code=404, detail="Conversation not found or already deleted")
 
     return {"status": "deleted"}
 
@@ -809,7 +861,7 @@ async def clear_agent_memory(
         }
     except Exception as e:
         logger.error(f"Failed to clear agent memory: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to clear agent memory.")
 
 
 @router.post("/agent/status")
@@ -846,7 +898,7 @@ async def get_agent_status(
         return {
             "langchain_enabled": True,
             "rag_enabled": settings.RAG_ENABLED,
-            "error": str(e),
+            "error": "Failed to retrieve agent status",
         }
 
 
@@ -882,7 +934,7 @@ async def index_sheet_for_rag(
 
     sheet_name = request.sheet_name or "Sheet1"
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     try:
         result = await loop.run_in_executor(
@@ -947,7 +999,7 @@ async def rag_search(
 
     sheet_name = request.sheet_name or "Sheet1"
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     try:
         results = await loop.run_in_executor(
@@ -968,4 +1020,4 @@ async def rag_search(
 
     except Exception as e:
         logger.error(f"RAG search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Search failed. Please try again.")

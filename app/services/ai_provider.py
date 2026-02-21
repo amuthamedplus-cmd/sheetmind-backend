@@ -41,6 +41,29 @@ EXAMPLE 3:
 User: "List all unique departments"
 You: "The unique departments in column C are: Engineering, Marketing, Sales, HR, Finance (5 total)."
 
+EXAMPLE 4:
+User: "Show the top 10 values in Profit column"
+You: "Here are the top 10 profit values (column G, sorted highest to lowest):
+1. Row 15: $12,450
+2. Row 8: $11,200
+... (list all 10)"
+
+Then include a sort action:
+```sheetaction
+{"action": "sort", "column": "G", "ascending": false}
+```
+
+EXAMPLE 5:
+User: "Show me top 5 sales"
+You: "Here are the top 5 sales values from column F:
+1. Row 22: $45,000
+2. Row 11: $38,500
+..."
+
+```sheetaction
+{"action": "sort", "column": "F", "ascending": false}
+```
+
 Rules:
 1. ALWAYS read the table headers and data before responding.
 2. When referencing data, cite exact cell ranges (e.g. "Cell B3", "Range A2:A50").
@@ -48,6 +71,10 @@ Rules:
 4. Keep responses concise.
 5. NEVER say you cannot answer a question about the data. You have the data — analyze it and respond.
 6. NEVER refuse to count, sum, average, or list data. You have full access to the spreadsheet content.
+7. DO NOT ask unnecessary clarifying questions. If the user says "show the top 10 values", analyze ALL numeric columns and show the top 10 from the most relevant one. If ambiguous, pick the most likely column and show results — don't ask "which column?"
+8. When the user refers to a follow-up (e.g. "no, the profit column"), understand they are correcting or specifying something from the previous message. Re-do the analysis with the corrected column.
+9. ALWAYS perform the actual analysis and return real values from the data. Never just describe what columns exist — that is useless. The user wants RESULTS, not descriptions.
+10. For "top N" or "bottom N" requests, sort the data mentally, list the top/bottom N values with their row references, AND include a sort sheet action.
 
 SHEET ACTIONS:
 ONLY when the user explicitly asks to FILTER, SORT, HIGHLIGHT, CREATE A CHART, or MODIFY the sheet, include a JSON action block at the END of your response.
@@ -377,9 +404,14 @@ def _call_model(
         messages=messages,
         temperature=0.3,
         max_tokens=2000,
+        timeout=30,
     )
 
-    return response.choices[0].message.content
+    text = response.choices[0].message.content or ""
+    if len(text) > _MAX_RESPONSE_CHARS:
+        logger.warning(f"LLM response truncated from {len(text)} to {_MAX_RESPONSE_CHARS} chars")
+        text = text[:_MAX_RESPONSE_CHARS] + "\n\n[Response truncated]"
+    return text
 
 
 def _is_refusal(text: str) -> bool:
@@ -452,6 +484,26 @@ def _call_with_fallback(
 
 
 # ---------------------------------------------------------------------------
+# Input guards
+# ---------------------------------------------------------------------------
+
+# Max characters sent to the LLM (context + message combined).
+# Roughly ~100k chars ≈ 25k tokens — safe for Gemini's 1M window, keeps cost down.
+_MAX_CONTEXT_CHARS = 100_000
+_MAX_MESSAGE_CHARS = 10_000
+# Max response length — prevents runaway LLM output from consuming memory/bandwidth.
+_MAX_RESPONSE_CHARS = 50_000
+
+
+def _truncate(text: str, limit: int, label: str = "input") -> str:
+    """Truncate text to *limit* chars, logging a warning if it was trimmed."""
+    if len(text) <= limit:
+        return text
+    logger.warning(f"Truncating {label} from {len(text)} to {limit} chars")
+    return text[:limit]
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -462,7 +514,9 @@ def chat_completion(
     history: list[dict] | None = None,
 ) -> str:
     """Send a chat query to AI. Tries Gemini direct first, falls back to OpenRouter."""
+    message = _truncate(message, _MAX_MESSAGE_CHARS, "chat message")
     context = _build_context_message(sheet_data, sheet_name)
+    context = _truncate(context, _MAX_CONTEXT_CHARS, "chat context")
     return _call_with_fallback(SYSTEM_PROMPT, message, context, "chat", history)
 
 
@@ -476,7 +530,9 @@ def agent_completion(
 
     Returns parsed JSON dict with steps, or None if parsing fails.
     """
+    message = _truncate(message, _MAX_MESSAGE_CHARS, "agent message")
     context = _build_context_message(sheet_data, sheet_name)
+    context = _truncate(context, _MAX_CONTEXT_CHARS, "agent context")
     raw = _call_with_fallback(AGENT_SYSTEM_PROMPT, message, context, "agent", history)
 
     # Try to parse the JSON response
@@ -497,19 +553,22 @@ def formula_completion(
     range_data: list[list] | None = None,
 ) -> str:
     """Process a =SHEETMIND() formula request. Returns the result value."""
+    prompt = _truncate(prompt, _MAX_MESSAGE_CHARS, "formula prompt")
     context = ""
     if range_data:
         context = "Cell data:\n"
         for i, row in enumerate(range_data):
             context += f"  Row {i + 1}: {json.dumps(row)}\n"
+    context = _truncate(context, _MAX_CONTEXT_CHARS, "formula context")
     return _call_with_fallback(FORMULA_SYSTEM_PROMPT, prompt, context, "formula")
 
 
 def fix_formula(formula: str, error_message: str, sheet_context: str | None = None) -> dict:
     """Fix a broken spreadsheet formula. Returns dict with fixed_formula, what_was_wrong, explanation."""
+    formula = _truncate(formula, _MAX_MESSAGE_CHARS, "fix formula")
     user_message = f"Broken formula:\n{formula}\n\nError message:\n{error_message}"
     if sheet_context:
-        user_message += f"\n\nSheet context:\n{sheet_context}"
+        user_message += f"\n\nSheet context:\n{_truncate(sheet_context, _MAX_CONTEXT_CHARS, 'fix context')}"
 
     raw = _call_with_fallback(FIX_SYSTEM_PROMPT, user_message, "", "fix")
 
@@ -529,6 +588,7 @@ def fix_formula(formula: str, error_message: str, sheet_context: str | None = No
 
 def explain_formula(formula: str) -> str:
     """Explain a spreadsheet formula in plain English."""
+    formula = _truncate(formula, _MAX_MESSAGE_CHARS, "explain formula")
     user_message = f"Explain this spreadsheet formula:\n\n{formula}"
     return _call_with_fallback(EXPLAIN_SYSTEM_PROMPT, user_message, "", "explain")
 
@@ -592,13 +652,15 @@ def generate_chart_config(
         parts.append(f"Chart type requested: {chart_type}")
     if title:
         parts.append(f"Chart title: {title}")
-    parts.append(f"Data:\n{json.dumps(data)}")
+    data_str = _truncate(json.dumps(data), _MAX_CONTEXT_CHARS, "chart data")
+    parts.append(f"Data:\n{data_str}")
     user_message = "\n".join(parts)
     return _call_with_fallback(CHART_SYSTEM_PROMPT, user_message, "", "chart")
 
 
 def explain_formula_enhanced(formula: str) -> dict:
     """Explain a formula with step-by-step breakdown. Returns parsed dict."""
+    formula = _truncate(formula, _MAX_MESSAGE_CHARS, "enhanced explain formula")
     user_message = f"Explain this spreadsheet formula step by step:\n\n{formula}"
     raw = _call_with_fallback(ENHANCED_EXPLAIN_SYSTEM_PROMPT, user_message, "", "enhanced_explain")
 
