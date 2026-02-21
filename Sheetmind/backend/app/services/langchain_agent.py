@@ -115,7 +115,15 @@ ACTION INPUT EXAMPLES:
 - set_values: {{"sheet": "Summary", "range": "A1:B1", "values": [["Major", "Total"]]}}
 - format_headers: {{"sheet": "Summary", "range": "A1:B1"}}
 - set_formula: {{"sheet": "Summary", "cell": "A2", "formula": "=UNIQUE('Sheet1'!B2:B31)"}}
+- insert_column: {{"after": "E", "header": "Total Sales"}}
+- set_cell_value: {{"cell": "F2", "value": "=D2+E2"}}
 - create_chart: {{"type": "bar", "title": "Title", "dataSheet": "Summary", "labelColumn": "A", "valueColumn": "B", "startRow": 2, "endRow": 3}}
+
+INSERTING COLUMNS AND SETTING VALUES ON ACTIVE SHEET:
+When adding new calculated columns to the CURRENT/ACTIVE sheet:
+Step 1: insert_column to add the column (e.g., {{"after": "E", "header": "Total"}})
+Step 2: set_cell_value for the formula in the first data row (e.g., {{"cell": "F2", "value": "=D2+E2"}})
+Step 3: Use auto_fill_down to fill the formula down (e.g., {{"sheet": "{sheet_name}", "sourceCell": "F2", "lastRow": {last_row}}})
 
 GROUPED SUMMARY WITH CHART WORKFLOW:
 Step 1: lookup_formula("sum by category") to get the correct formula pattern

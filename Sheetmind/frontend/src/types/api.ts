@@ -58,6 +58,7 @@ export interface ChatRequest {
   force_refresh?: boolean;
   history?: HistoryMessage[];
   mode?: ChatMode;  // "action" = create sheets/formulas, "chat" = just answer
+  sheets?: string[];  // List of sheet names from the workbook
 }
 
 export interface SheetAction {
@@ -201,6 +202,8 @@ export interface ChatResponse {
   pii_warning?: string | null;
   // Clarification cards
   clarification?: Clarification | null;
+  // Follow-up suggestions
+  followup_suggestions?: QuickAction[] | null;
 }
 
 export interface UndoInfo {
@@ -233,6 +236,8 @@ export interface Message {
   // Clarification cards
   clarification?: Clarification;
   clarificationAnswered?: boolean;
+  // Follow-up suggestions
+  followup_suggestions?: QuickAction[];
 }
 
 export interface ConversationListResponse {

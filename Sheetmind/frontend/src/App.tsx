@@ -406,6 +406,7 @@ function App() {
           sheet_name: sheetData?.sheetName ?? undefined,
           history: history.length > 0 ? history : undefined,
           mode: mode,
+          sheets: sheets.length > 0 ? sheets.map(s => s.name) : undefined,
         });
 
         const elapsed = Math.round(performance.now() - startTime);
@@ -441,6 +442,7 @@ function App() {
             agent_timing: res.agent_timing ?? undefined,
             pii_warning: res.pii_warning ?? undefined,
             clarification: res.clarification ?? undefined,
+            followup_suggestions: res.followup_suggestions ?? undefined,
           };
           setMessages((prev) => [...prev, assistantMessage]);
 
@@ -465,6 +467,7 @@ function App() {
             agent_timing: res.agent_timing ?? undefined,
             pii_warning: res.pii_warning ?? undefined,
             clarification: res.clarification ?? undefined,
+            followup_suggestions: res.followup_suggestions ?? undefined,
           };
           setMessages((prev) => [...prev, assistantMessage]);
         }

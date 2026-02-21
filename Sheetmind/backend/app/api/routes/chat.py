@@ -171,6 +171,47 @@ def _extract_sheet_action(text: str) -> tuple[str, dict | None]:
         return text, None
 
 
+# Fallback: Extract action JSON objects from text when agent outputs them inline
+_INLINE_ACTION_RE = re.compile(
+    r'\{[^{}]*"action"\s*:\s*"(?:insertColumn|setValue|createSheet|setFormula|'
+    r'setValues|autoFillDown|formatRange|highlight|filter|sort|clearFilters|'
+    r'createChart)"[^{}]*\}',
+    re.DOTALL
+)
+
+
+def _extract_actions_from_text(text: str) -> list[StepAction] | None:
+    """Extract action JSON objects embedded in agent text response.
+
+    When the LLM outputs action JSON as text instead of using tools,
+    this parser catches them and converts to proper StepAction objects.
+
+    Returns list of StepAction or None if no actions found.
+    """
+    matches = _INLINE_ACTION_RE.findall(text)
+    if not matches:
+        return None
+
+    actions = []
+    for i, raw in enumerate(matches):
+        try:
+            action = json.loads(raw)
+            if "action" in action:
+                actions.append(
+                    StepAction(
+                        step=i + 1,
+                        description=action.get("action", "Action"),
+                        action=action,
+                        formula=action.get("formula") or action.get("value"),
+                        about=None,
+                    )
+                )
+        except json.JSONDecodeError:
+            continue
+
+    return actions if actions else None
+
+
 # Phase 4A: Detect column types and generate quick actions
 def _generate_quick_actions(sheet_data: dict | None, sheet_name: str | None) -> list[QuickAction]:
     """Generate smart quick action suggestions based on column types."""
@@ -302,15 +343,17 @@ def _persist_chat(
 
 
 _COLUMN_QUESTION = re.compile(
-    r"which\s+column|what\s+column|select\s+.*column|choose\s+.*column",
+    r"which\s+(column|field|header)|what\s+(column|field|header)|"
+    r"select\s+.*column|choose\s+.*column|pick\s+.*column|"
+    r"specify\s+.*column|tell\s+me\s+.*column",
     re.IGNORECASE,
 )
 _SHEET_QUESTION = re.compile(
-    r"which\s+sheet|what\s+sheet|select\s+.*sheet",
+    r"which\s+sheet|what\s+sheet|select\s+.*sheet|choose\s+.*sheet|pick\s+.*sheet",
     re.IGNORECASE,
 )
 _RANGE_QUESTION = re.compile(
-    r"which\s+range|what\s+range|which\s+cells",
+    r"which\s+range|what\s+range|which\s+cells|specify\s+.*range",
     re.IGNORECASE,
 )
 
@@ -340,7 +383,7 @@ def _detect_clarification(
     # e.g. user said "profit" 2 messages ago → AI shouldn't ask "which column?"
     if history and len(history) >= 2:
         recent_user_msgs = " ".join(
-            m.get("content", "") for m in history[-6:] if m.get("role") == "user"
+            m.get("content", "") for m in history[-2:] if m.get("role") == "user"
         ).lower()
         # If column question but user already mentioned a column name from metadata
         if _COLUMN_QUESTION.search(ai_response) and sheet_metadata:
@@ -412,6 +455,48 @@ def _detect_clarification(
         }
 
     return None
+
+
+_FOLLOWUP_SECTION = re.compile(
+    r"(?:what\s+would\s+you\s+like\s+to\s+do\s+next\??|"
+    r"here\s+are\s+some\s+suggestions|"
+    r"you\s+(?:could|can|might)\s+also|"
+    r"next\s+steps)"
+    r"[:\s]*\n"
+    r"((?:\s*\d+[.)]\s+.+\n?)+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+_NUMBERED_ITEM = re.compile(r"^\s*\d+[.)]\s+(.+)", re.MULTILINE)
+
+
+def _extract_followup_suggestions(text: str) -> tuple[str, list[QuickAction]]:
+    """Extract numbered follow-up suggestions from AI text.
+
+    Returns (cleaned_text, list_of_QuickAction).
+    The suggestions section is stripped from content to avoid duplication
+    with the structured buttons the frontend renders.
+    """
+    match = _FOLLOWUP_SECTION.search(text)
+    if not match:
+        return text, []
+
+    items = _NUMBERED_ITEM.findall(match.group(0))
+    if not items or len(items) < 2:
+        return text, []
+
+    suggestions = [
+        QuickAction(label=item.strip().rstrip("."), prompt=item.strip().rstrip("."))
+        for item in items[:4]  # cap at 4
+    ]
+
+    # Remove the follow-up section from the content text
+    cleaned = text[:match.start()].rstrip()
+    remainder = text[match.end():].strip()
+    if remainder:
+        cleaned = cleaned + "\n" + remainder
+
+    return cleaned.strip(), suggestions
 
 
 def _fetch_db_history(conversation_id: str, limit: int = 20) -> list[dict] | None:
@@ -873,6 +958,13 @@ async def chat_query(
     if not steps:
         ai_response, sheet_action = _extract_sheet_action(ai_response)
 
+    # Fallback: extract action JSON from text when agent outputted actions as text
+    if not steps and is_agent_query:
+        extracted_steps = _extract_actions_from_text(ai_response)
+        if extracted_steps:
+            steps = extracted_steps
+            logger.info(f"Fallback parser extracted {len(steps)} actions from text response")
+
     # Phase 4: Generate quick actions on first message (no conversation yet, skip for greetings)
     quick_actions = None
     if not request.conversation_id and effective_sheet_data and not is_greeting:
@@ -880,13 +972,17 @@ async def chat_query(
         if qa_list:
             quick_actions = qa_list
 
+    # Extract follow-up suggestions from AI text (strip from content, return structured)
+    followup_suggestions = None
+    if not steps:
+        ai_response, followups = _extract_followup_suggestions(ai_response)
+        if followups:
+            followup_suggestions = followups
+
     # Detect clarification questions in AI response
     clarification = None
     if not steps:  # Don't offer clarification when we already have an execution plan
-        sheets_list = None
-        if request.sheet_data and "cells" in (request.sheet_data or {}):
-            # Build simple sheet list from the sheets the frontend knows about
-            sheets_list = None  # Populated from frontend context if needed
+        sheets_list = request.sheets if request.sheets else None
         clarification = _detect_clarification(ai_response, sheet_metadata, sheets_list, history)
 
     profile_data = timer.log("chat_query")
@@ -912,6 +1008,8 @@ async def chat_query(
         "pii_warning": pii_warning,
         # Clarification cards
         "clarification": clarification,
+        # Follow-up suggestions
+        "followup_suggestions": [s.model_dump() for s in followup_suggestions] if followup_suggestions else None,
     }
 
     if profile:

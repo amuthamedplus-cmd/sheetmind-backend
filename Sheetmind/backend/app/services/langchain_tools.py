@@ -867,6 +867,77 @@ def create_chart(input_json: str) -> str:
     return f"Chart '{title}' ({chart_type}) will be created using data from {data_sheet}!{label_col}{start_row}:{value_col}{end_row or 'last'}"
 
 
+@tool
+def insert_column(input_json: str) -> str:
+    """
+    Insert a new column into the active sheet.
+    Use this when you need to add a new column for calculations like totals, percentages, etc.
+
+    Args:
+        input_json: A JSON string with keys:
+            - after: Column letter to insert after (e.g., "E" inserts new column after E)
+            - header: (optional) Header text for the new column
+
+        Example: {"after": "E", "header": "Total Sales"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON input. Expected {"after": "E", "header": "Total Sales"}'
+    )
+    if error:
+        return error
+
+    after_col = data.get("after", "A")
+    header = data.get("header", "")
+
+    action = {"action": "insertColumn", "after": after_col}
+    if header:
+        action["header"] = header
+
+    _queue_action(action)
+    msg = f"Inserted column after {after_col}"
+    if header:
+        msg += f" with header '{header}'"
+    return msg
+
+
+@tool
+def set_cell_value(input_json: str) -> str:
+    """
+    Set a value or formula in a single cell on the ACTIVE sheet.
+    Use this for quick single-cell updates like adding a formula, a label, or a computed value.
+
+    For formulas on a NEW/DIFFERENT sheet, use set_formula instead.
+    For multiple cells at once, use set_values instead.
+
+    Args:
+        input_json: A JSON string with keys:
+            - cell: Cell reference (e.g., "F2", "A1")
+            - value: The value or formula to set (e.g., "=D2+E2", "Total", 100)
+
+        Example: {"cell": "F2", "value": "=D2+E2"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON input. Expected {"cell": "F2", "value": "=D2+E2"}'
+    )
+    if error:
+        return error
+
+    cell = data.get("cell", "A1")
+    value = data.get("value", "")
+
+    action = {"action": "setValue", "cell": cell, "value": value}
+    _queue_action(action)
+    return f"Set {cell} = {value}"
+
+
 # ---------------------------------------------------------------------------
 # TOOL LISTS
 # ---------------------------------------------------------------------------
@@ -889,8 +960,10 @@ WRITING_TOOLS = [
     create_sheet,
     set_formula,
     set_values,
+    set_cell_value,
     format_headers,
     auto_fill_down,
+    insert_column,
     create_chart,
 ]
 

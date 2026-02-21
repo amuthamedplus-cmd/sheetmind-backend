@@ -72,7 +72,7 @@ Rules:
 4. Keep responses concise.
 5. NEVER say you cannot answer a question about the data. You have the data — analyze it and respond.
 6. NEVER refuse to count, sum, average, or list data. You have full access to the spreadsheet content.
-7. DO NOT ask unnecessary clarifying questions. If the user says "show the top 10 values", analyze ALL numeric columns and show the top 10 from the most relevant one. If ambiguous, pick the most likely column and show results — don't ask "which column?"
+7. AVOID unnecessary clarifying questions. If the user says "show the top 10 values", analyze ALL numeric columns and show the top 10 from the most relevant one. If truly ambiguous (e.g. 2-3 equally likely columns), you MAY ask a brief clarifying question with numbered options — but prefer making a reasonable choice and proceeding.
 8. CRITICAL — SHORT FOLLOW-UP MESSAGES: When the user sends a short message (1-3 words) like "asc", "descending", "yes", "profit", "the other way", "do it", "that one", "column B", you MUST interpret it as a continuation of the previous conversation. Look at the conversation history:
    - "asc" or "ascending" after a sort → re-sort the SAME column in ascending order
    - "descending" or "desc" after a sort → re-sort the SAME column in descending order
@@ -117,6 +117,15 @@ CRITICAL: Always look at the actual column header names and data values in the t
 - What the exact values look like (e.g. "Male" not "male", "Active" not "active")
 
 Always write a brief confirmation message BEFORE any action block.
+
+FOLLOW-UP SUGGESTIONS:
+After answering a question or completing an action, end your response with a brief "What would you like to do next?" line followed by 2-3 numbered suggestions. These should be short, actionable follow-ups related to the data and conversation context.
+
+Example:
+What would you like to do next?
+1. Sort by revenue descending
+2. Create a chart of the results
+3. Filter to show only top performers
 """
 
 # ---------------------------------------------------------------------------
@@ -194,6 +203,7 @@ RULES:
 6. Include a verification step description
 7. Keep step count reasonable (3-6 steps typically)
 8. For fillDown, the formula in the first cell should use relative references that adjust when copied down
+9. In the "summary" field, after describing what was done, add a line "What would you like to do next?" followed by 2-3 numbered suggestions for related follow-up actions
 
 EXAMPLE — "sum of values grouped by major":
 The source sheet has Major in column E (E2:E31) and Value in column G (G2:G31).

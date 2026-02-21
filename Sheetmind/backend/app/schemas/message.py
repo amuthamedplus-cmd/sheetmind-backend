@@ -146,6 +146,7 @@ class ChatRequest(BaseModel):
     force_refresh: bool = False
     history: list[HistoryMessage] | None = None
     mode: ChatMode | None = None  # "action" = create sheets/formulas, "chat" = just answer
+    sheets: list[str] | None = None  # List of sheet names from the frontend
 
     # --- Input size limits ---
     MAX_MESSAGE_LENGTH: int = 5000
@@ -215,6 +216,8 @@ class ChatResponse(BaseModel):
     pii_warning: str | None = None
     # Clarification cards (clickable options)
     clarification: Clarification | None = None
+    # Follow-up suggestions (clickable buttons)
+    followup_suggestions: list[QuickAction] | None = None
 
 
 class MessageResponse(BaseModel):

@@ -310,11 +310,13 @@ function parseMessageContent(text: string): ParsedBlock[] {
         i++;
       }
 
-      // If the previous block was a paragraph ending with ? or :, treat as clickable options
+      // If the previous block was a paragraph ending with ? or : (with optional whitespace),
+      // or contains follow-up prompt patterns, treat as clickable options
       const prev = blocks[blocks.length - 1];
-      const isQuestion = prev && prev.type === "paragraph" && /[?:]$/.test(prev.content.trim());
+      const isQuestion = prev && prev.type === "paragraph" && /[?:]\s*$/.test(prev.content.trim());
+      const isFollowUpPrompt = prev && prev.type === "paragraph" && /(?:would\s+you\s+like|you\s+(?:can|could|might)|here\s+are|options|try\s+(?:one|these|the))/i.test(prev.content);
 
-      if (isQuestion && items.length >= 2 && items.length <= 6) {
+      if ((isQuestion || isFollowUpPrompt) && items.length >= 2 && items.length <= 8) {
         const questionText = prev.content;
         blocks.pop(); // remove the question paragraph
         blocks.push({ type: "options", content: "", options: items, questionText });
@@ -511,8 +513,8 @@ function MessageArea({ messages, isLoading, error, responseTime, onUndo, onQuick
       <div className="flex-1 flex flex-col items-center justify-center px-5 text-center">
         {/* Animated logo */}
         <div className="relative mb-5 animate-fade-in-up">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-700 flex items-center justify-center shadow-xl shadow-emerald-500/20 animate-float">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" className="text-white">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-xl shadow-emerald-500/20 animate-float">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="text-white">
               <path d="M4 4h6v6H4V4Z" fill="currentColor" opacity="0.4" />
               <path d="M14 4h6v6h-6V4Z" fill="currentColor" opacity="0.6" />
               <path d="M4 14h6v6H4v-6Z" fill="currentColor" opacity="0.6" />
@@ -521,7 +523,7 @@ function MessageArea({ messages, isLoading, error, responseTime, onUndo, onQuick
             </svg>
           </div>
           {/* Decorative ring */}
-          <div className="absolute inset-0 w-16 h-16 rounded-2xl border-2 border-emerald-200 animate-ping opacity-20" />
+          <div className="absolute inset-0 w-12 h-12 rounded-xl border-2 border-emerald-200 animate-ping opacity-20" />
         </div>
 
         <h2 className="text-lg font-bold text-slate-900 mb-1 animate-fade-in-up delay-1">
@@ -668,6 +670,26 @@ function MessageArea({ messages, isLoading, error, responseTime, onUndo, onQuick
                 disabled={!!msg.clarificationAnswered}
                 onSelect={(value) => onClarificationSelect?.(msg.id, value)}
               />
+            )}
+
+            {/* Follow-up Suggestion Chips (compact, inline) */}
+            {msg.role === "assistant" && msg.followup_suggestions && msg.followup_suggestions.length > 0 && !msg.clarification && (
+              <div className="mt-2 pt-2 border-t border-slate-50">
+                <div className="flex flex-wrap gap-1.5">
+                  {msg.followup_suggestions.map((suggestion, j) => (
+                    <button
+                      key={j}
+                      onClick={() => onQuickAction?.(suggestion.prompt)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-slate-100 bg-slate-50/80 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 active:scale-[0.97] transition-all"
+                    >
+                      <svg className="w-3 h-3 flex-shrink-0 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                      </svg>
+                      {suggestion.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
 
             {/* Reasoning Steps */}
