@@ -434,6 +434,7 @@ function App() {
             content,
             sources: res.sources,
             steps: res.steps.map((s) => ({ ...s, _status: "pending" })),
+            chart_config: res.chart_config ?? undefined,
             thinking: res.thinking ?? undefined,
             verification: res.verification ?? undefined,
             // LangChain specific fields
