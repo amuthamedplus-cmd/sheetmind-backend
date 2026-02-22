@@ -1031,38 +1031,24 @@ function _conditionalFormat(sheetName, rangeStr, options) {
 
   if (type === "comparison") {
     var op = options.operator || "greaterThan";
-    var val = options.value;
-    var condMap = {
-      "greaterThan": SpreadsheetApp.BooleanCriteria.NUMBER_GREATER_THAN,
-      "lessThan": SpreadsheetApp.BooleanCriteria.NUMBER_LESS_THAN,
-      "equalTo": SpreadsheetApp.BooleanCriteria.NUMBER_EQUAL_TO,
-      "greaterThanOrEqualTo": SpreadsheetApp.BooleanCriteria.NUMBER_GREATER_THAN_OR_EQUAL_TO,
-      "lessThanOrEqualTo": SpreadsheetApp.BooleanCriteria.NUMBER_LESS_THAN_OR_EQUAL_TO,
-      "notEqualTo": SpreadsheetApp.BooleanCriteria.NUMBER_NOT_EQUAL_TO,
-      "between": SpreadsheetApp.BooleanCriteria.NUMBER_BETWEEN
-    };
-    var crit = condMap[op];
-    if (!crit) return "Unknown operator: " + op;
+    var val = Number(options.value);
 
-    if (op === "between") {
-      builder.whenNumberBetween(val, options.valueTo);
-    } else {
-      builder.whenCellNotEmpty(); // fallback
-      // Use specific when* methods based on criteria
-      if (op === "greaterThan") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberGreaterThan(val);
-      else if (op === "lessThan") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberLessThan(val);
-      else if (op === "equalTo") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberEqualTo(val);
-      else if (op === "greaterThanOrEqualTo") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberGreaterThanOrEqualTo(val);
-      else if (op === "lessThanOrEqualTo") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberLessThanOrEqualTo(val);
-      else if (op === "notEqualTo") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberNotEqualTo(val);
+    switch (op) {
+      case "greaterThan": builder.whenNumberGreaterThan(val); break;
+      case "lessThan": builder.whenNumberLessThan(val); break;
+      case "equalTo": builder.whenNumberEqualTo(val); break;
+      case "greaterThanOrEqualTo": builder.whenNumberGreaterThanOrEqualTo(val); break;
+      case "lessThanOrEqualTo": builder.whenNumberLessThanOrEqualTo(val); break;
+      case "notEqualTo": builder.whenNumberNotEqualTo(val); break;
+      case "between": builder.whenNumberBetween(val, Number(options.valueTo)); break;
+      default: return "Unknown operator: " + op;
     }
   } else if (type === "text") {
-    builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range])
-      .whenTextContains(options.textContains || "");
+    builder.whenTextContains(options.textContains || "");
   } else if (type === "empty") {
-    builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenCellEmpty();
+    builder.whenCellEmpty();
   } else if (type === "notEmpty") {
-    builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenCellNotEmpty();
+    builder.whenCellNotEmpty();
   }
 
   // Apply formatting

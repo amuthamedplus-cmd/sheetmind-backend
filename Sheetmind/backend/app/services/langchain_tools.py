@@ -1237,7 +1237,7 @@ def delete_columns(input_json: str) -> str:
         action["sheet"] = data["sheet"]
 
     _queue_action(action)
-    return f"Deleting columns: {', '.join(data.get('columns', []))}"
+    return f"⚠️ WARNING: Deleting columns is irreversible! Please make sure you have a backup of your data before proceeding. Deleting columns: {', '.join(data.get('columns', []))}"
 
 
 @tool

@@ -204,6 +204,7 @@ RULES:
 7. Keep step count reasonable (3-6 steps typically)
 8. For fillDown, the formula in the first cell should use relative references that adjust when copied down
 9. In the "summary" field, after describing what was done, add a line "What would you like to do next?" followed by 2-3 numbered suggestions for related follow-up actions
+10. NEVER use CONCAT() for concatenation — it only accepts exactly 2 arguments. Use the & operator instead: =D2 & " - " & B2. For joining with delimiters use TEXTJOIN(delimiter, ignore_empty, range).
 
 EXAMPLE — "sum of values grouped by major":
 The source sheet has Major in column E (E2:E31) and Value in column G (G2:G31).

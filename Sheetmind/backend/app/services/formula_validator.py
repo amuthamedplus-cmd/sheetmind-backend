@@ -316,6 +316,14 @@ def suggest_alternatives(formula: str) -> List[str]:
             "=IFS(cond1, val1, cond2, val2, ..., TRUE, default)."
         )
 
+    # CONCAT only takes 2 args — suggest & operator
+    concat_match = re.search(r'CONCAT\s*\(', upper)
+    if concat_match and not re.search(r'CONCATENATE\s*\(', upper):
+        suggestions.append(
+            "CONCAT() only accepts exactly 2 arguments. Use the & operator instead: "
+            "=A1 & \" - \" & B1. For joining with delimiters use TEXTJOIN()."
+        )
+
     # CONCATENATE -> TEXTJOIN or &
     if "CONCATENATE" in upper:
         suggestions.append(
