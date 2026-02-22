@@ -74,7 +74,7 @@ app.add_middleware(
     allow_origins=settings.cors_origins_list,
     # Only match Google Apps Script sandbox domains, not all of googleusercontent.com
     # (which also hosts user-uploaded content like Drive previews, Blogger images, etc.)
-    allow_origin_regex=r"https://n-[a-z0-9]+-script\.googleusercontent\.com",
+    allow_origin_regex=r"https://n-[a-z0-9-]+-script\.googleusercontent\.com",
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
