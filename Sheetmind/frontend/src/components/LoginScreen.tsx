@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { authApi } from "../services/api";
+import type { User } from "../types/api";
 import {
   trackLoginPageViewed, trackLoginGoogleClicked, trackLoginEmailSubmitted,
   trackLoginSuccess, trackSignupSuccess, trackLoginError,
 } from "../services/analytics";
 
 interface LoginScreenProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (user?: User) => void;
 }
 
 type AuthMode = "login" | "signup";
@@ -65,8 +66,17 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       }
       if (event.data?.type === "sheetmind-oauth" && event.data.access_token) {
         authApi.setTokens(event.data.access_token, event.data.refresh_token || "");
-        trackLoginSuccess("google");
-        onLoginSuccess();
+        // Exchange tokens via callback to get user info (avatar, name, etc.)
+        authApi.callback(event.data.access_token, event.data.refresh_token || "")
+          .then((result) => {
+            trackLoginSuccess("google");
+            onLoginSuccess(result.user);
+          })
+          .catch(() => {
+            // Callback failed but tokens are stored — proceed without user data
+            trackLoginSuccess("google");
+            onLoginSuccess();
+          });
       }
     };
     window.addEventListener("message", handleMessage);
@@ -121,7 +131,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         if (result.access_token) {
           authApi.setTokens(result.access_token, result.refresh_token || "");
           trackLoginSuccess("email");
-          onLoginSuccess();
+          onLoginSuccess(result.user);
         }
       }
     } catch (err: any) {

@@ -231,10 +231,10 @@ function App() {
   }, [isLoggedIn, loadConversations]);
 
   // Handle login success
-  const handleLoginSuccess = useCallback(async () => {
+  const handleLoginSuccess = useCallback(async (userData?: User) => {
     setIsLoggedIn(true);
     try {
-      const u = await authApi.me();
+      const u = userData || await authApi.me();
       setUser(u);
       identifyUser({ id: u.id, email: u.email, name: u.name, tier: u.tier, auth_method: "login" });
       startSession({ auth_method: "login", sheet_connected: false });

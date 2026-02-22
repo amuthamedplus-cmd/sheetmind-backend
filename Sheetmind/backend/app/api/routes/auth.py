@@ -101,14 +101,6 @@ async def oauth_complete():
     back to the opener window (GAS sidebar) via postMessage,
     then closes itself.
     """
-    # Build a list of allowed origins for postMessage targeting.
-    # This prevents tokens from being intercepted by a malicious opener.
-    import json as _json
-    allowed_origins = list(settings.cors_origins_list)
-    if settings.FRONTEND_URL and settings.FRONTEND_URL not in allowed_origins:
-        allowed_origins.append(settings.FRONTEND_URL)
-    allowed_origins_js = _json.dumps(allowed_origins)
-
     return HTMLResponse(content=f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -144,26 +136,22 @@ async def oauth_complete():
   var accessToken = params.get("access_token");
   var refreshToken = params.get("refresh_token");
   var el = function(id){{ return document.getElementById(id); }};
-  var allowedOrigins = {allowed_origins_js};
 
   if (accessToken && window.opener) {{
-    // Send tokens to each allowed origin — only the real opener will receive it.
-    // postMessage with a specific targetOrigin ensures other origins cannot intercept.
-    var sent = false;
-    for (var i = 0; i < allowedOrigins.length; i++) {{
-      try {{
-        window.opener.postMessage({{
-          type: "sheetmind-oauth",
-          access_token: accessToken,
-          refresh_token: refreshToken || "",
-          origin: window.location.origin
-        }}, allowedOrigins[i]);
-        sent = true;
-      }} catch(e) {{ /* opener may have been closed */ }}
-    }}
-    // Log if no postMessage was delivered (helps debug origin mismatches)
-    if (!sent) {{
-      console.warn("SheetMind: Could not deliver tokens — origin mismatch. Check addon configuration.");
+    // Send tokens back to the opener via postMessage.
+    // Use "*" as targetOrigin because the GAS sidebar runs on a dynamic
+    // sandbox origin (n-<hash>-script.googleusercontent.com) that changes
+    // per session and cannot be predicted. Security is enforced on the
+    // receiver side which validates event.origin before accepting tokens.
+    try {{
+      window.opener.postMessage({{
+        type: "sheetmind-oauth",
+        access_token: accessToken,
+        refresh_token: refreshToken || "",
+        origin: window.location.origin
+      }}, "*");
+    }} catch(e) {{
+      console.warn("SheetMind: Could not deliver tokens to opener:", e);
     }}
 
     el("spinner").style.display = "none";
