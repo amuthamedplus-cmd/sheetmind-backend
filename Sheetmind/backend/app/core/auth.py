@@ -39,7 +39,7 @@ def _validate_and_fetch_user(token: str) -> dict:
     google_id = user_meta.get("provider_id", user_meta.get("sub", user_id))
 
     # Try to find existing user — fetch only needed columns
-    _USER_COLUMNS = "id, email, name, tier, avatar_url, payment_customer_id, payment_subscription_id, subscription_status"
+    _USER_COLUMNS = "id, email, name, tier, avatar_url, payment_customer_id, payment_subscription_id"
     result = sb.table("users").select(_USER_COLUMNS).eq("id", user_id).execute()
     if result.data:
         return result.data[0]
