@@ -1229,12 +1229,24 @@ def delete_columns(input_json: str) -> str:
     if error:
         return error
 
+    # Ensure columns is always a list
+    columns = data.get("columns", [])
+    if isinstance(columns, str):
+        columns = [columns]
+
+    if not columns:
+        return "Error: No columns specified to delete. Provide columns as an array e.g. [\"C\", \"E\"]"
+
+    # Always include sheet name — don't rely on active sheet which can change between steps
+    ctx = _current_sheet_context.get()
+    sheet_name = data.get("sheet") or (ctx.get("sheetName") if ctx else None)
+
     action = {
         "action": "deleteColumns",
-        "columns": data.get("columns", []),
+        "columns": columns,
     }
-    if "sheet" in data:
-        action["sheet"] = data["sheet"]
+    if sheet_name:
+        action["sheet"] = sheet_name
 
     _queue_action(action)
     return f"⚠️ WARNING: Deleting columns is irreversible! Please make sure you have a backup of your data before proceeding. Deleting columns: {', '.join(data.get('columns', []))}"

@@ -306,7 +306,8 @@ function App() {
         const result = await executeStepAction(step.action);
 
         // Update step status to "done" or "error"
-        const status = result.startsWith("Error") ? "error" : "done";
+        const isError = result.startsWith("Error") || result.startsWith("Action failed") || result.startsWith("Not running");
+        const status = isError ? "error" : "done";
         setMessages((prev) =>
           prev.map((msg) => {
             if (msg.id !== messageId || !msg.steps) return msg;

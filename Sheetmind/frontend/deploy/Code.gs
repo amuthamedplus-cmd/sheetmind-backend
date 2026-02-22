@@ -906,7 +906,13 @@ function _deleteRows(sheetName, rows, condition) {
  */
 function _deleteColumns(sheetName, columns) {
   var sheet = _getSheet(sheetName);
-  if (!columns || columns.length === 0) return "No columns to delete";
+  if (!columns) return "Error: No columns to delete";
+
+  // Ensure columns is an array (AI might send a string like "C" instead of ["C"])
+  if (typeof columns === "string") {
+    columns = [columns];
+  }
+  if (!Array.isArray(columns) || columns.length === 0) return "Error: No valid columns to delete";
 
   // Convert to indices and sort descending
   var indices = columns.map(function(c) { return _letterToColumn(c.toUpperCase()); });
