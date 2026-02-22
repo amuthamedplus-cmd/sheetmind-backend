@@ -32,7 +32,7 @@ def _get_redis() -> redis.Redis | None:
     After a failed connection, skips retries for _REDIS_RETRY_INTERVAL seconds
     to avoid adding timeout latency to every request.
     """
-    global _redis_client, _redis_last_fail
+    global _redis_client, _redis_last_fail, _redis_down_since
 
     if _redis_client is not None:
         return _redis_client
@@ -58,7 +58,6 @@ def _get_redis() -> redis.Redis | None:
             _redis_down_since = 0
         return _redis_client
     except Exception as e:
-        global _redis_down_since
         _redis_last_fail = time.time()
         if not _redis_down_since:
             _redis_down_since = time.time()
