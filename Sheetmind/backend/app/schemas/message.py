@@ -2,7 +2,7 @@ import json
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import ClassVar, Optional
 
 from pydantic import BaseModel, field_validator
 
@@ -148,11 +148,11 @@ class ChatRequest(BaseModel):
     mode: ChatMode | None = None  # "action" = create sheets/formulas, "chat" = just answer
     sheets: list[str] | None = None  # List of sheet names from the frontend
 
-    # --- Input size limits ---
-    MAX_MESSAGE_LENGTH: int = 5000
-    MAX_SHEET_CELLS: int = 50_000
-    MAX_SHEET_DATA_BYTES: int = 5_000_000  # 5 MB
-    MAX_HISTORY_LENGTH: int = 50  # 25 exchanges
+    # --- Input size limits (ClassVar so Pydantic treats them as constants, not fields) ---
+    MAX_MESSAGE_LENGTH: ClassVar[int] = 5000
+    MAX_SHEET_CELLS: ClassVar[int] = 50_000
+    MAX_SHEET_DATA_BYTES: ClassVar[int] = 5_000_000  # 5 MB
+    MAX_HISTORY_LENGTH: ClassVar[int] = 50  # 25 exchanges
 
     @field_validator("message")
     @classmethod
