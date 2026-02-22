@@ -181,6 +181,12 @@ AVAILABLE ACTIONS:
    - Add "fillDown": true to copy the formula down for all rows
 4. formatRange: {"action": "formatRange", "sheet": "Sheet Name", "range": "A1:B1", "bold": true, "background": "#4472C4", "fontColor": "#FFFFFF"}
 5. autoFillDown: {"action": "autoFillDown", "sheet": "Sheet Name", "sourceCell": "B2", "lastRow": 10}
+6. conditionalFormat: {"action": "conditionalFormat", "sheet": "Sheet Name", "range": "D2:D100", "type": "comparison", "operator": "greaterThan", "value": 1000, "background": "#FF0000", "fontColor": "#FFFFFF"}
+   - Types: "comparison", "text", "colorScale", "empty", "notEmpty"
+   - Operators: "greaterThan", "lessThan", "equalTo", "greaterThanOrEqualTo", "lessThanOrEqualTo", "notEqualTo", "between"
+   - CRITICAL: Use the CORRECT column from the spreadsheet context — never guess column positions
+   - Range must skip header row (start at row 2) and use actual last_row
+   - ALWAYS include "background" color — without it the rule has no visible effect
 
 GOOGLE SHEETS FORMULAS TO USE:
 - UNIQUE(range) — get unique values

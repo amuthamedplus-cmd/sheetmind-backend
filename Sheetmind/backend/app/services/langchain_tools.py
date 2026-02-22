@@ -1353,10 +1353,14 @@ def conditional_format(input_json: str) -> str:
     """
     Add a conditional formatting rule to a range.
 
+    IMPORTANT: Before calling this, ALWAYS call get_headers first to identify the correct
+    column letter. Never guess column positions. Use the actual sheet name and last_row.
+    The range should be "ColumnLetter2:ColumnLetterN" (skip header row).
+
     Args:
         input_json: JSON with keys:
-            - sheet: Sheet name (required)
-            - range: Range to format (e.g. "B2:B100") (required)
+            - sheet: Sheet name (required — use the actual sheet name, not "Sheet1")
+            - range: Range to format (e.g. "D2:D100") (required — must match the correct column)
             - type: "comparison", "text", "colorScale", "empty", "notEmpty" (required)
             - operator: For comparison: "greaterThan", "lessThan", "equalTo", "greaterThanOrEqualTo",
                         "lessThanOrEqualTo", "notEqualTo", "between"
@@ -1727,8 +1731,19 @@ def verify_actions() -> dict:
             cf_type = action.get("type", "")
             if cf_type == "comparison" and not action.get("operator"):
                 issues.append(f"Action {i+1}: conditionalFormat comparison requires 'operator'")
+            if cf_type == "comparison" and action.get("value") is None:
+                issues.append(f"Action {i+1}: conditionalFormat comparison requires 'value'")
             if cf_type == "text" and not action.get("textContains"):
                 issues.append(f"Action {i+1}: conditionalFormat text requires 'textContains'")
+            # Warn if no visible formatting effect
+            if cf_type != "colorScale" and not action.get("background") and not action.get("fontColor") and not action.get("bold"):
+                issues.append(f"Action {i+1}: conditionalFormat has no visible effect — add 'background', 'fontColor', or 'bold'")
+            # Fix sheet name if it's the default "Sheet1" but actual sheet is different
+            cf_sheet = action.get("sheet", "")
+            actual_sheet = ctx.get("sheetName", "")
+            if cf_sheet == "Sheet1" and actual_sheet and actual_sheet != "Sheet1":
+                action["sheet"] = actual_sheet
+                fixes.append(f"Action {i+1}: Fixed conditionalFormat sheet from 'Sheet1' to '{actual_sheet}'")
 
         if action_type == "dataValidation":
             dv_type = action.get("type", "")

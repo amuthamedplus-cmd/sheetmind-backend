@@ -125,6 +125,7 @@ ACTION INPUT EXAMPLES:
 - insert_column: {{"after": "E", "header": "Total Sales"}}
 - set_cell_value: {{"cell": "F2", "value": "=D2+E2"}}
 - create_chart: {{"type": "bar", "title": "Title", "dataSheet": "Summary", "labelColumn": "A", "valueColumn": "B", "startRow": 2, "endRow": 3}}
+- conditional_format: {{"sheet": "{sheet_name}", "range": "D2:D{last_row}", "type": "comparison", "operator": "greaterThan", "value": 1000, "background": "#FF0000", "fontColor": "#FFFFFF"}}
 
 INSERTING COLUMNS AND SETTING VALUES ON ACTIVE SHEET:
 When adding new calculated columns to the CURRENT/ACTIVE sheet:
@@ -149,6 +150,26 @@ CRITICAL FOR CHARTS:
 
 CHART TYPES: bar, line, pie, doughnut, scatter
 When user asks for a chart/graph/visualization, ALWAYS use create_chart tool after preparing the data.
+
+CONDITIONAL FORMATTING WORKFLOW:
+When user asks to highlight, color, or conditionally format cells:
+Step 1: ALWAYS call get_headers first to identify the correct column letter for the data the user mentions
+Step 2: Use the sheet metadata to get the last row ({{last_row}})
+Step 3: Build the range as "X2:X{{last_row}}" where X is the correct column letter from Step 1 (skip header row 1)
+Step 4: Call conditional_format with the correct range, type, operator, value, and colors
+Example — "highlight sales above 1000 in red":
+  - get_headers → find that "Sales" is in column D
+  - conditional_format: {{"sheet": "'{sheet_name}'", "range": "D2:D{{last_row}}", "type": "comparison", "operator": "greaterThan", "value": 1000, "background": "#FF0000", "fontColor": "#FFFFFF"}}
+Example — "color scale on GPA column":
+  - get_headers → find that "GPA" is in column E
+  - conditional_format: {{"sheet": "'{sheet_name}'", "range": "E2:E{{last_row}}", "type": "colorScale", "colorScaleMin": "#FF0000", "colorScaleMax": "#00FF00"}}
+
+CRITICAL FOR CONDITIONAL FORMATTING:
+- NEVER guess column letters — always call get_headers first to find the right column
+- Use the actual sheet name '{sheet_name}', not "Sheet1"
+- Range must be "ColumnLetter2:ColumnLetterN" (skip header row 1, end at last_row)
+- For number comparisons, value must be a number not a string
+- Always include background color — without it the rule has no visible effect
 
 Begin!
 
