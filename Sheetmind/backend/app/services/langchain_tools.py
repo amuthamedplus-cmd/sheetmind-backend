@@ -939,6 +939,649 @@ def set_cell_value(input_json: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# BATCH 1: FORMATTING POWERHOUSE (5 actions)
+# ---------------------------------------------------------------------------
+
+@tool
+def format_range(input_json: str) -> str:
+    """
+    Apply rich formatting to a range: bold, italic, strikethrough, fontSize, fontFamily,
+    fontColor, background, alignment, and text wrap.
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (required)
+            - range: Range like "A1:D1" (required)
+            - bold: true/false
+            - italic: true/false
+            - strikethrough: true/false
+            - fontSize: number (e.g. 12, 14, 18)
+            - fontFamily: font name (e.g. "Arial", "Roboto", "Courier New")
+            - fontColor: hex color (e.g. "#FF0000")
+            - background: hex color (e.g. "#4472C4")
+            - horizontalAlignment: "left", "center", or "right"
+            - verticalAlignment: "top", "middle", or "bottom"
+            - wrapStrategy: "WRAP", "OVERFLOW", or "CLIP"
+
+        Example: {"sheet": "Sheet1", "range": "A1:D1", "bold": true, "fontSize": 14, "horizontalAlignment": "center", "background": "#4472C4", "fontColor": "#FFFFFF"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"sheet": "...", "range": "...", "bold": true, ...}'
+    )
+    if error:
+        return error
+
+    sheet = data.get("sheet", "Sheet1")
+    range_str = data.get("range", "A1")
+
+    action = {
+        "action": "formatRange",
+        "sheet": sheet,
+        "range": range_str,
+    }
+    for key in ["bold", "italic", "strikethrough", "fontSize", "fontFamily",
+                 "fontColor", "background", "horizontalAlignment", "verticalAlignment", "wrapStrategy"]:
+        if key in data:
+            action[key] = data[key]
+
+    _queue_action(action)
+    return f"Formatted {sheet}!{range_str}"
+
+
+@tool
+def set_number_format(input_json: str) -> str:
+    """
+    Set number format for a range (currency, percent, date, etc.).
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (required)
+            - range: Range like "B2:B100" (required)
+            - format: "currency", "percent", "number", "date", "datetime", "text", or "custom" (required)
+            - decimals: Number of decimal places (default 2)
+            - currencySymbol: e.g. "$", "€", "£" (for currency format)
+            - customPattern: Custom pattern like "#,##0.00" (for custom format)
+
+        Example: {"sheet": "Sheet1", "range": "C2:C50", "format": "currency", "decimals": 2, "currencySymbol": "$"}
+        Example: {"sheet": "Sheet1", "range": "D2:D50", "format": "percent", "decimals": 1}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"sheet": "...", "range": "...", "format": "currency"}'
+    )
+    if error:
+        return error
+
+    sheet = data.get("sheet", "Sheet1")
+    range_str = data.get("range", "A1")
+    fmt = data.get("format", "number")
+
+    action = {
+        "action": "numberFormat",
+        "sheet": sheet,
+        "range": range_str,
+        "format": fmt,
+    }
+    for key in ["decimals", "currencySymbol", "customPattern"]:
+        if key in data:
+            action[key] = data[key]
+
+    _queue_action(action)
+    return f"Set number format '{fmt}' on {sheet}!{range_str}"
+
+
+@tool
+def set_borders(input_json: str) -> str:
+    """
+    Add borders to a range.
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (required)
+            - range: Range like "A1:F20" (required)
+            - style: "all", "outline", "inner", "top", "bottom", "left", "right" (default "all")
+            - weight: "thin" or "thick" (default "thin")
+            - color: Hex color (default "#000000")
+
+        Example: {"sheet": "Sheet1", "range": "A1:F20", "style": "all", "weight": "thin"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"sheet": "...", "range": "...", "style": "all"}'
+    )
+    if error:
+        return error
+
+    sheet = data.get("sheet", "Sheet1")
+    range_str = data.get("range", "A1")
+
+    action = {
+        "action": "setBorders",
+        "sheet": sheet,
+        "range": range_str,
+        "style": data.get("style", "all"),
+        "weight": data.get("weight", "thin"),
+        "color": data.get("color", "#000000"),
+    }
+    _queue_action(action)
+    return f"Set borders ({action['style']}) on {sheet}!{range_str}"
+
+
+@tool
+def freeze_rows_columns(input_json: str) -> str:
+    """
+    Freeze rows and/or columns so they stay visible when scrolling.
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (optional, defaults to active sheet)
+            - rows: Number of rows to freeze from the top (e.g. 1 for header row)
+            - columns: Number of columns to freeze from the left (e.g. 1)
+
+        Example: {"rows": 1}  — freeze header row
+        Example: {"sheet": "Data", "rows": 2, "columns": 1}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"rows": 1} or {"rows": 1, "columns": 1}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "freeze",
+    }
+    if "sheet" in data:
+        action["sheet"] = data["sheet"]
+    if "rows" in data:
+        action["rows"] = data["rows"]
+    if "columns" in data:
+        action["columns"] = data["columns"]
+
+    _queue_action(action)
+    parts = []
+    if "rows" in data:
+        parts.append(f"{data['rows']} row(s)")
+    if "columns" in data:
+        parts.append(f"{data['columns']} column(s)")
+    return f"Froze {' and '.join(parts)}"
+
+
+@tool
+def auto_resize_columns(input_json: str) -> str:
+    """
+    Auto-resize columns to fit their content.
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (optional, defaults to active sheet)
+            - columns: Array of column letters (e.g. ["A", "B", "C"]) or "all"
+
+        Example: {"columns": ["A", "B", "C"]}
+        Example: {"sheet": "Summary", "columns": "all"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"columns": ["A", "B"]} or {"columns": "all"}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "autoResize",
+        "columns": data.get("columns", "all"),
+    }
+    if "sheet" in data:
+        action["sheet"] = data["sheet"]
+
+    _queue_action(action)
+    cols = data.get("columns", "all")
+    col_str = ", ".join(cols) if isinstance(cols, list) else cols
+    return f"Auto-resized columns: {col_str}"
+
+
+# ---------------------------------------------------------------------------
+# BATCH 2: ROW/COLUMN/DATA OPERATIONS (5 actions)
+# ---------------------------------------------------------------------------
+
+@tool
+def delete_rows(input_json: str) -> str:
+    """
+    Delete rows from the sheet. WARNING: This action is irreversible!
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (optional, defaults to active sheet)
+            - rows: Array of row numbers to delete (e.g. [3, 5, 8])
+            OR
+            - condition: Object with {column, value} to delete matching rows
+              or {column, empty: true} to delete rows where that column is empty
+
+        Example: {"rows": [3, 5, 8]}
+        Example: {"sheet": "Data", "condition": {"column": "B", "value": "N/A"}}
+        Example: {"condition": {"column": "A", "empty": true}}  — delete all rows where column A is empty
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"rows": [3, 5]} or {"condition": {"column": "B", "value": "..."}}'
+    )
+    if error:
+        return error
+
+    action = {"action": "deleteRows"}
+    if "sheet" in data:
+        action["sheet"] = data["sheet"]
+    if "rows" in data:
+        action["rows"] = data["rows"]
+    if "condition" in data:
+        action["condition"] = data["condition"]
+
+    _queue_action(action)
+    if "rows" in data:
+        return f"Deleting rows: {data['rows']}"
+    elif "condition" in data:
+        cond = data["condition"]
+        if cond.get("empty"):
+            return f"Deleting rows where column {cond['column']} is empty"
+        return f"Deleting rows where column {cond['column']} = {cond.get('value', '')}"
+    return "Delete rows queued"
+
+
+@tool
+def delete_columns(input_json: str) -> str:
+    """
+    Delete columns from the sheet. WARNING: This action is irreversible!
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (optional, defaults to active sheet)
+            - columns: Array of column letters to delete (e.g. ["C", "E"])
+
+        Example: {"columns": ["C", "E"]}
+        Example: {"sheet": "Data", "columns": ["F"]}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"columns": ["C", "E"]}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "deleteColumns",
+        "columns": data.get("columns", []),
+    }
+    if "sheet" in data:
+        action["sheet"] = data["sheet"]
+
+    _queue_action(action)
+    return f"Deleting columns: {', '.join(data.get('columns', []))}"
+
+
+@tool
+def merge_cells(input_json: str) -> str:
+    """
+    Merge or unmerge cells in a range.
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (required)
+            - range: Range to merge (e.g. "A1:D1")
+            - type: "merge" (all), "mergeVertically", "mergeHorizontally", or "unmerge"
+
+        Example: {"sheet": "Sheet1", "range": "A1:D1", "type": "merge"}
+        Example: {"sheet": "Sheet1", "range": "A1:D1", "type": "unmerge"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"sheet": "...", "range": "A1:D1", "type": "merge"}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "mergeCells",
+        "sheet": data.get("sheet", "Sheet1"),
+        "range": data.get("range", "A1"),
+        "type": data.get("type", "merge"),
+    }
+    _queue_action(action)
+    return f"{action['type'].capitalize()} cells {action['sheet']}!{action['range']}"
+
+
+@tool
+def clear_range(input_json: str) -> str:
+    """
+    Clear contents, formatting, or both from a range.
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (required)
+            - range: Range to clear (e.g. "A2:F100")
+            - type: "all" (contents + formatting), "contents" (values/formulas only), or "formatting" (styles only)
+
+        Example: {"sheet": "Sheet1", "range": "A2:F100", "type": "contents"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"sheet": "...", "range": "...", "type": "all"}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "clearRange",
+        "sheet": data.get("sheet", "Sheet1"),
+        "range": data.get("range", "A1"),
+        "type": data.get("type", "all"),
+    }
+    _queue_action(action)
+    return f"Cleared {action['type']} from {action['sheet']}!{action['range']}"
+
+
+@tool
+def copy_range(input_json: str) -> str:
+    """
+    Copy a range from one location to another, optionally across sheets.
+
+    Args:
+        input_json: JSON with keys:
+            - sourceSheet: Source sheet name (required)
+            - sourceRange: Range to copy (e.g. "A1:D10") (required)
+            - destSheet: Destination sheet name (required)
+            - destCell: Top-left cell of destination (e.g. "A1") (required)
+            - valuesOnly: If true, paste values only (no formulas/formatting). Default false.
+
+        Example: {"sourceSheet": "Sheet1", "sourceRange": "A1:D10", "destSheet": "Sheet2", "destCell": "A1", "valuesOnly": true}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"sourceSheet": "...", "sourceRange": "...", "destSheet": "...", "destCell": "..."}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "copyRange",
+        "sourceSheet": data.get("sourceSheet", "Sheet1"),
+        "sourceRange": data.get("sourceRange", "A1"),
+        "destSheet": data.get("destSheet", "Sheet1"),
+        "destCell": data.get("destCell", "A1"),
+        "valuesOnly": data.get("valuesOnly", False),
+    }
+    _queue_action(action)
+    return f"Copied {action['sourceSheet']}!{action['sourceRange']} to {action['destSheet']}!{action['destCell']}"
+
+
+# ---------------------------------------------------------------------------
+# BATCH 3: CONDITIONAL FORMATTING & DATA VALIDATION (2 actions)
+# ---------------------------------------------------------------------------
+
+@tool
+def conditional_format(input_json: str) -> str:
+    """
+    Add a conditional formatting rule to a range.
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (required)
+            - range: Range to format (e.g. "B2:B100") (required)
+            - type: "comparison", "text", "colorScale", "empty", "notEmpty" (required)
+            - operator: For comparison: "greaterThan", "lessThan", "equalTo", "greaterThanOrEqualTo",
+                        "lessThanOrEqualTo", "notEqualTo", "between"
+            - value: Comparison value (number or text)
+            - valueTo: Second value for "between" operator
+            - textContains: Text to match for type="text"
+            - background: Hex color for matching cells (e.g. "#FF0000")
+            - fontColor: Hex color for text in matching cells
+            - bold: true/false for matching cells
+            - colorScaleMin: Hex color for minimum value (for colorScale)
+            - colorScaleMid: Hex color for midpoint value (for colorScale)
+            - colorScaleMax: Hex color for maximum value (for colorScale)
+
+        Example: {"sheet": "Sheet1", "range": "C2:C100", "type": "comparison", "operator": "greaterThan", "value": 100, "background": "#FF0000"}
+        Example: {"sheet": "Sheet1", "range": "A2:A100", "type": "text", "textContains": "error", "background": "#FFCCCC"}
+        Example: {"sheet": "Sheet1", "range": "D2:D100", "type": "colorScale", "colorScaleMin": "#FF0000", "colorScaleMax": "#00FF00"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"sheet": "...", "range": "...", "type": "comparison", ...}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "conditionalFormat",
+        "sheet": data.get("sheet", "Sheet1"),
+        "range": data.get("range", "A1"),
+        "type": data.get("type", "comparison"),
+    }
+    for key in ["operator", "value", "valueTo", "textContains", "background",
+                 "fontColor", "bold", "colorScaleMin", "colorScaleMid", "colorScaleMax"]:
+        if key in data:
+            action[key] = data[key]
+
+    _queue_action(action)
+    return f"Added conditional format rule on {action['sheet']}!{action['range']}"
+
+
+@tool
+def set_data_validation(input_json: str) -> str:
+    """
+    Set data validation rules on a range (dropdowns, number ranges, checkboxes).
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (required)
+            - range: Range to validate (e.g. "E2:E100") (required)
+            - type: "list", "number", "date", "checkbox", "custom" (required)
+            - values: Array of allowed values for type="list" (e.g. ["Yes", "No", "Maybe"])
+            - min: Minimum value for type="number"
+            - max: Maximum value for type="number"
+            - allowInvalid: If false, reject invalid input (default true)
+            - customFormula: Formula for type="custom" (e.g. "=LEN(A1)>5")
+
+        Example: {"sheet": "Sheet1", "range": "E2:E100", "type": "list", "values": ["Yes", "No", "Maybe"]}
+        Example: {"sheet": "Sheet1", "range": "F2:F100", "type": "number", "min": 0, "max": 100}
+        Example: {"sheet": "Sheet1", "range": "G2:G100", "type": "checkbox"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"sheet": "...", "range": "...", "type": "list", "values": [...]}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "dataValidation",
+        "sheet": data.get("sheet", "Sheet1"),
+        "range": data.get("range", "A1"),
+        "type": data.get("type", "list"),
+    }
+    for key in ["values", "min", "max", "allowInvalid", "customFormula"]:
+        if key in data:
+            action[key] = data[key]
+
+    _queue_action(action)
+    return f"Set data validation ({action['type']}) on {action['sheet']}!{action['range']}"
+
+
+# ---------------------------------------------------------------------------
+# BATCH 4: SHEET MANAGEMENT & SEARCH (4 actions)
+# ---------------------------------------------------------------------------
+
+@tool
+def rename_sheet(input_json: str) -> str:
+    """
+    Rename an existing sheet.
+
+    Args:
+        input_json: JSON with keys:
+            - oldName: Current sheet name (required)
+            - newName: New sheet name (required)
+
+        Example: {"oldName": "Sheet1", "newName": "Raw Data"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"oldName": "...", "newName": "..."}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "renameSheet",
+        "oldName": data.get("oldName", ""),
+        "newName": data.get("newName", ""),
+    }
+    _queue_action(action)
+    return f"Renamed sheet '{action['oldName']}' to '{action['newName']}'"
+
+
+@tool
+def copy_sheet(input_json: str) -> str:
+    """
+    Duplicate/copy an existing sheet within the same spreadsheet.
+
+    Args:
+        input_json: JSON with keys:
+            - source: Name of the sheet to copy (required)
+            - newName: Name for the copy (required)
+
+        Example: {"source": "Sheet1", "newName": "Sheet1 - Backup"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"source": "...", "newName": "..."}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "copySheet",
+        "source": data.get("source", ""),
+        "newName": data.get("newName", ""),
+    }
+    _queue_action(action)
+    return f"Copied sheet '{action['source']}' as '{action['newName']}'"
+
+
+@tool
+def delete_sheet(input_json: str) -> str:
+    """
+    Delete a sheet. WARNING: This is irreversible! Cannot delete the last remaining sheet.
+
+    Args:
+        input_json: JSON with keys:
+            - name: Name of the sheet to delete (required)
+
+        Example: {"name": "Old Summary"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"name": "..."}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "deleteSheet",
+        "name": data.get("name", ""),
+    }
+    _queue_action(action)
+    return f"Deleting sheet '{action['name']}'"
+
+
+@tool
+def find_and_replace(input_json: str) -> str:
+    """
+    Find and replace text across a sheet or range.
+
+    Args:
+        input_json: JSON with keys:
+            - sheet: Sheet name (optional, defaults to active sheet)
+            - find: Text to search for (required)
+            - replace: Replacement text (required, use "" for empty)
+            - range: Limit search to a range (optional, e.g. "A1:D100")
+            - matchCase: Case-sensitive search (default false)
+
+        Example: {"find": "N/A", "replace": ""}
+        Example: {"sheet": "Data", "find": "USD", "replace": "$", "matchCase": true}
+        Example: {"sheet": "Data", "find": "old", "replace": "new", "range": "A1:A100"}
+
+    Returns:
+        Confirmation message.
+    """
+    data, error = _parse_json_input(
+        input_json,
+        'Invalid JSON. Expected {"find": "...", "replace": "..."}'
+    )
+    if error:
+        return error
+
+    action = {
+        "action": "findReplace",
+        "find": data.get("find", ""),
+        "replace": data.get("replace", ""),
+    }
+    if "sheet" in data:
+        action["sheet"] = data["sheet"]
+    if "range" in data:
+        action["range"] = data["range"]
+    if "matchCase" in data:
+        action["matchCase"] = data["matchCase"]
+
+    _queue_action(action)
+    return f"Find '{action['find']}' and replace with '{action['replace']}'"
+
+
+# ---------------------------------------------------------------------------
 # TOOL LISTS
 # ---------------------------------------------------------------------------
 
@@ -962,9 +1605,19 @@ WRITING_TOOLS = [
     set_values,
     set_cell_value,
     format_headers,
+    format_range,
     auto_fill_down,
     insert_column,
     create_chart,
+    set_number_format,
+    set_borders,
+    merge_cells,
+    copy_range,
+    clear_range,
+    rename_sheet,
+    copy_sheet,
+    delete_sheet,
+    find_and_replace,
 ]
 
 # Manipulation tools (create actions for frontend)
@@ -973,6 +1626,12 @@ MANIPULATION_TOOLS = [
     filter_data,
     sort_data,
     clear_filters,
+    delete_rows,
+    delete_columns,
+    conditional_format,
+    set_data_validation,
+    freeze_rows_columns,
+    auto_resize_columns,
 ]
 
 # All sheet tools (RAG tools added separately)
@@ -1050,6 +1709,35 @@ def verify_actions() -> dict:
             # Check for unreasonable endRow
             if end_row and end_row > last_row + 10:
                 issues.append(f"Action {i+1}: Chart endRow={end_row} seems too large")
+
+        # Validate new action types
+        if action_type == "deleteRows":
+            if not action.get("rows") and not action.get("condition"):
+                issues.append(f"Action {i+1}: deleteRows requires 'rows' or 'condition'")
+
+        if action_type == "deleteColumns":
+            if not action.get("columns"):
+                issues.append(f"Action {i+1}: deleteColumns requires 'columns'")
+
+        if action_type == "deleteSheet":
+            if not action.get("name"):
+                issues.append(f"Action {i+1}: deleteSheet requires 'name'")
+
+        if action_type == "conditionalFormat":
+            cf_type = action.get("type", "")
+            if cf_type == "comparison" and not action.get("operator"):
+                issues.append(f"Action {i+1}: conditionalFormat comparison requires 'operator'")
+            if cf_type == "text" and not action.get("textContains"):
+                issues.append(f"Action {i+1}: conditionalFormat text requires 'textContains'")
+
+        if action_type == "dataValidation":
+            dv_type = action.get("type", "")
+            if dv_type == "list" and not action.get("values"):
+                issues.append(f"Action {i+1}: dataValidation list requires 'values'")
+
+        if action_type == "findReplace":
+            if not action.get("find") and action.get("find") != "":
+                issues.append(f"Action {i+1}: findReplace requires 'find'")
 
     # Write back any fixes applied to actions
     _pending_actions.set(actions)

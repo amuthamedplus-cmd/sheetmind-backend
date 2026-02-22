@@ -44,6 +44,19 @@ function _letterToColumn(letter) {
   return col;
 }
 
+/**
+ * Get a sheet by name, or active sheet if no name provided.
+ * @param {string} sheetName - Sheet name (optional)
+ * @return {Sheet} The sheet object
+ */
+function _getSheet(sheetName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!sheetName) return ss.getActiveSheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error("Sheet not found: " + sheetName);
+  return sheet;
+}
+
 // Must exceed backend RAG_THRESHOLD_ROWS (500) so RAG can activate on large sheets.
 // The MAX_CELLS (50,000) safety check below still prevents memory issues on wide sheets.
 var MAX_ROWS = 2000;
@@ -205,6 +218,42 @@ function executeSheetAction(action) {
       return formatRange(action.sheet, action.range, action);
     case "readRange":
       return JSON.stringify(readRange(action.sheet, action.range));
+    case "deleteCharts":
+      return _deleteChartsOnSheet(action.sheet);
+    // Batch 1: Formatting
+    case "numberFormat":
+      return _applyNumberFormat(action.sheet, action.range, action);
+    case "setBorders":
+      return _setBorders(action.sheet, action.range, action);
+    case "freeze":
+      return _freeze(action.sheet, action.rows, action.columns);
+    case "autoResize":
+      return _autoResizeColumns(action.sheet, action.columns);
+    // Batch 2: Row/Column/Data ops
+    case "deleteRows":
+      return _deleteRows(action.sheet, action.rows, action.condition);
+    case "deleteColumns":
+      return _deleteColumns(action.sheet, action.columns);
+    case "mergeCells":
+      return _mergeCells(action.sheet, action.range, action.type);
+    case "clearRange":
+      return _clearRange(action.sheet, action.range, action.type);
+    case "copyRange":
+      return _copyRange(action.sourceSheet, action.sourceRange, action.destSheet, action.destCell, action.valuesOnly);
+    // Batch 3: Conditional formatting & validation
+    case "conditionalFormat":
+      return _conditionalFormat(action.sheet, action.range, action);
+    case "dataValidation":
+      return _setDataValidation(action.sheet, action.range, action);
+    // Batch 4: Sheet management & search
+    case "renameSheet":
+      return _renameSheet(action.oldName, action.newName);
+    case "copySheet":
+      return _copySheet(action.source, action.newName);
+    case "deleteSheet":
+      return _deleteSheet(action.name);
+    case "findReplace":
+      return _findReplace(action.sheet, action.find, action.replace, action.range, action.matchCase);
     default:
       return "Unknown action: " + action.action;
   }
@@ -463,6 +512,22 @@ function _createChartFromColumns(chartType, title, dataSheet, labelColumn, value
   return "Created " + (chartType || "bar") + " chart '" + title + "' from " + dataSheet + " (" + labelRangeStr + ", " + valueRangeStr + ")";
 }
 
+/**
+ * Remove all charts from a sheet.
+ * @param {string} sheetName - Name of the sheet to clear charts from.
+ * @return {string} Status message.
+ */
+function _deleteChartsOnSheet(sheetName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = sheetName ? ss.getSheetByName(sheetName) : ss.getActiveSheet();
+  if (!sheet) return "Sheet not found: " + sheetName;
+  var charts = sheet.getCharts();
+  for (var i = 0; i < charts.length; i++) {
+    sheet.removeChart(charts[i]);
+  }
+  return "Removed " + charts.length + " chart(s) from " + sheet.getName();
+}
+
 // ─────────────────────────────────────────────
 // Agent-style actions — Phase 2C
 // ─────────────────────────────────────────────
@@ -605,6 +670,29 @@ function formatRange(sheetName, rangeStr, options) {
   if (options.fontColor) {
     range.setFontColor(options.fontColor);
   }
+  if (options.italic) {
+    range.setFontStyle("italic");
+  }
+  if (options.strikethrough) {
+    range.setFontLine("line-through");
+  }
+  if (options.fontSize) {
+    range.setFontSize(options.fontSize);
+  }
+  if (options.fontFamily) {
+    range.setFontFamily(options.fontFamily);
+  }
+  if (options.horizontalAlignment) {
+    range.setHorizontalAlignment(options.horizontalAlignment);
+  }
+  if (options.verticalAlignment) {
+    range.setVerticalAlignment(options.verticalAlignment);
+  }
+  if (options.wrapStrategy) {
+    var wrapMap = { "WRAP": SpreadsheetApp.WrapStrategy.WRAP, "OVERFLOW": SpreadsheetApp.WrapStrategy.OVERFLOW, "CLIP": SpreadsheetApp.WrapStrategy.CLIP };
+    var ws = wrapMap[options.wrapStrategy];
+    if (ws) range.setWrapStrategy(ws);
+  }
 
   return "Formatted " + sheetName + "!" + rangeStr;
 }
@@ -628,6 +716,464 @@ function readRange(sheetName, rangeStr) {
     range: rangeStr,
     values: values
   };
+}
+
+// ─────────────────────────────────────────────
+// New Actions — Batch 1: Formatting
+// ─────────────────────────────────────────────
+
+/**
+ * Apply number formatting to a range.
+ */
+function _applyNumberFormat(sheetName, rangeStr, options) {
+  var sheet = _getSheet(sheetName);
+  var range = sheet.getRange(rangeStr);
+  var fmt = options.format || "number";
+  var decimals = options.decimals !== undefined ? options.decimals : 2;
+  var pattern;
+
+  switch (fmt) {
+    case "currency":
+      var sym = options.currencySymbol || "$";
+      pattern = sym + "#,##0." + "0".repeat(decimals);
+      break;
+    case "percent":
+      pattern = "0." + "0".repeat(decimals) + "%";
+      break;
+    case "number":
+      pattern = decimals > 0 ? "#,##0." + "0".repeat(decimals) : "#,##0";
+      break;
+    case "date":
+      pattern = "yyyy-mm-dd";
+      break;
+    case "datetime":
+      pattern = "yyyy-mm-dd hh:mm:ss";
+      break;
+    case "text":
+      pattern = "@";
+      break;
+    case "custom":
+      pattern = options.customPattern || "#,##0.00";
+      break;
+    default:
+      pattern = "#,##0.00";
+  }
+
+  range.setNumberFormat(pattern);
+  return "Set number format '" + fmt + "' on " + (sheetName || "active") + "!" + rangeStr;
+}
+
+/**
+ * Set borders on a range.
+ */
+function _setBorders(sheetName, rangeStr, options) {
+  var sheet = _getSheet(sheetName);
+  var range = sheet.getRange(rangeStr);
+  var style = options.style || "all";
+  var weight = options.weight || "thin";
+  var color = options.color || "#000000";
+
+  var borderStyle = weight === "thick" ? SpreadsheetApp.BorderStyle.SOLID_MEDIUM : SpreadsheetApp.BorderStyle.SOLID;
+
+  switch (style) {
+    case "all":
+      range.setBorder(true, true, true, true, true, true, color, borderStyle);
+      break;
+    case "outline":
+      range.setBorder(true, true, true, true, false, false, color, borderStyle);
+      break;
+    case "inner":
+      range.setBorder(false, false, false, false, true, true, color, borderStyle);
+      break;
+    case "top":
+      range.setBorder(true, false, false, false, false, false, color, borderStyle);
+      break;
+    case "bottom":
+      range.setBorder(false, false, true, false, false, false, color, borderStyle);
+      break;
+    case "left":
+      range.setBorder(false, true, false, false, false, false, color, borderStyle);
+      break;
+    case "right":
+      range.setBorder(false, false, false, true, false, false, color, borderStyle);
+      break;
+    default:
+      range.setBorder(true, true, true, true, true, true, color, borderStyle);
+  }
+
+  return "Set borders (" + style + ") on " + (sheetName || "active") + "!" + rangeStr;
+}
+
+/**
+ * Freeze rows and/or columns.
+ */
+function _freeze(sheetName, rows, columns) {
+  var sheet = _getSheet(sheetName);
+  if (rows !== undefined && rows !== null) {
+    sheet.setFrozenRows(rows);
+  }
+  if (columns !== undefined && columns !== null) {
+    sheet.setFrozenColumns(columns);
+  }
+  var parts = [];
+  if (rows) parts.push(rows + " row(s)");
+  if (columns) parts.push(columns + " column(s)");
+  return "Froze " + (parts.join(" and ") || "nothing") + " on " + sheet.getName();
+}
+
+/**
+ * Auto-resize columns to fit content.
+ */
+function _autoResizeColumns(sheetName, columns) {
+  var sheet = _getSheet(sheetName);
+  if (columns === "all") {
+    var lastCol = sheet.getLastColumn();
+    for (var c = 1; c <= lastCol; c++) {
+      sheet.autoResizeColumn(c);
+    }
+    return "Auto-resized all " + lastCol + " columns on " + sheet.getName();
+  }
+  if (Array.isArray(columns)) {
+    for (var i = 0; i < columns.length; i++) {
+      var colIndex = _letterToColumn(columns[i].toUpperCase());
+      sheet.autoResizeColumn(colIndex);
+    }
+    return "Auto-resized columns " + columns.join(", ") + " on " + sheet.getName();
+  }
+  return "Invalid columns parameter";
+}
+
+// ─────────────────────────────────────────────
+// New Actions — Batch 2: Row/Column/Data Ops
+// ─────────────────────────────────────────────
+
+/**
+ * Delete rows by row numbers or condition.
+ * Deletes bottom-to-top to preserve indices.
+ */
+function _deleteRows(sheetName, rows, condition) {
+  var sheet = _getSheet(sheetName);
+
+  if (condition) {
+    // Find rows matching condition
+    var colIndex = _letterToColumn(condition.column.toUpperCase());
+    var lastRow = sheet.getLastRow();
+    var dataRange = sheet.getRange(1, colIndex, lastRow, 1);
+    var values = dataRange.getValues();
+    rows = [];
+
+    for (var r = values.length - 1; r >= 1; r--) { // skip header (row 0)
+      var cellVal = values[r][0];
+      var shouldDelete = false;
+
+      if (condition.empty) {
+        shouldDelete = (cellVal === "" || cellVal === null || cellVal === undefined);
+      } else if (condition.value !== undefined) {
+        shouldDelete = (String(cellVal) === String(condition.value));
+      }
+
+      if (shouldDelete) {
+        rows.push(r + 1); // 1-indexed
+      }
+    }
+  }
+
+  if (!rows || rows.length === 0) return "No rows to delete";
+
+  // Sort descending to delete from bottom up
+  rows.sort(function(a, b) { return b - a; });
+
+  // Batch consecutive rows for efficiency
+  var deleted = 0;
+  var i = 0;
+  while (i < rows.length) {
+    var start = rows[i];
+    var count = 1;
+    while (i + count < rows.length && rows[i + count] === start - count) {
+      count++;
+    }
+    sheet.deleteRows(start - count + 1, count);
+    deleted += count;
+    i += count;
+  }
+
+  return "Deleted " + deleted + " row(s) from " + sheet.getName();
+}
+
+/**
+ * Delete columns by column letters.
+ * Deletes right-to-left to preserve indices.
+ */
+function _deleteColumns(sheetName, columns) {
+  var sheet = _getSheet(sheetName);
+  if (!columns || columns.length === 0) return "No columns to delete";
+
+  // Convert to indices and sort descending
+  var indices = columns.map(function(c) { return _letterToColumn(c.toUpperCase()); });
+  indices.sort(function(a, b) { return b - a; });
+
+  for (var i = 0; i < indices.length; i++) {
+    sheet.deleteColumn(indices[i]);
+  }
+
+  return "Deleted column(s) " + columns.join(", ") + " from " + sheet.getName();
+}
+
+/**
+ * Merge or unmerge cells.
+ */
+function _mergeCells(sheetName, rangeStr, type) {
+  var sheet = _getSheet(sheetName);
+  var range = sheet.getRange(rangeStr);
+
+  switch (type) {
+    case "merge":
+      range.merge();
+      break;
+    case "mergeVertically":
+      range.mergeVertically();
+      break;
+    case "mergeHorizontally":
+      range.mergeAcross();
+      break;
+    case "unmerge":
+      range.breakApart();
+      break;
+    default:
+      range.merge();
+  }
+
+  return (type || "merge") + " cells " + sheetName + "!" + rangeStr;
+}
+
+/**
+ * Clear contents, formatting, or both from a range.
+ */
+function _clearRange(sheetName, rangeStr, type) {
+  var sheet = _getSheet(sheetName);
+  var range = sheet.getRange(rangeStr);
+
+  switch (type) {
+    case "contents":
+      range.clearContent();
+      break;
+    case "formatting":
+      range.clearFormat();
+      break;
+    case "all":
+    default:
+      range.clear();
+      break;
+  }
+
+  return "Cleared " + (type || "all") + " from " + sheetName + "!" + rangeStr;
+}
+
+/**
+ * Copy a range to another location.
+ */
+function _copyRange(sourceSheetName, sourceRangeStr, destSheetName, destCell, valuesOnly) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var srcSheet = ss.getSheetByName(sourceSheetName);
+  if (!srcSheet) return "Source sheet not found: " + sourceSheetName;
+  var destSheet = ss.getSheetByName(destSheetName);
+  if (!destSheet) return "Destination sheet not found: " + destSheetName;
+
+  var srcRange = srcSheet.getRange(sourceRangeStr);
+  var dest = destSheet.getRange(destCell);
+
+  if (valuesOnly) {
+    srcRange.copyTo(dest, SpreadsheetApp.CopyPasteType.PASTE_VALUES, false);
+  } else {
+    srcRange.copyTo(dest);
+  }
+
+  return "Copied " + sourceSheetName + "!" + sourceRangeStr + " to " + destSheetName + "!" + destCell;
+}
+
+// ─────────────────────────────────────────────
+// New Actions — Batch 3: Conditional Format & Validation
+// ─────────────────────────────────────────────
+
+/**
+ * Add a conditional formatting rule.
+ */
+function _conditionalFormat(sheetName, rangeStr, options) {
+  var sheet = _getSheet(sheetName);
+  var range = sheet.getRange(rangeStr);
+  var type = options.type || "comparison";
+
+  if (type === "colorScale") {
+    var rule = SpreadsheetApp.newConditionalFormatRule()
+      .setGradientMinpoint(options.colorScaleMin || "#FF0000")
+      .setGradientMaxpoint(options.colorScaleMax || "#00FF00")
+      .setRanges([range])
+      .build();
+
+    if (options.colorScaleMid) {
+      rule = SpreadsheetApp.newConditionalFormatRule()
+        .setGradientMinpoint(options.colorScaleMin || "#FF0000")
+        .setGradientMidpointWithValue(options.colorScaleMid,
+          SpreadsheetApp.InterpolationType.PERCENTILE, "50")
+        .setGradientMaxpoint(options.colorScaleMax || "#00FF00")
+        .setRanges([range])
+        .build();
+    }
+
+    var rules = sheet.getConditionalFormatRules();
+    rules.push(rule);
+    sheet.setConditionalFormatRules(rules);
+    return "Added color scale rule on " + sheetName + "!" + rangeStr;
+  }
+
+  // Build boolean condition rule
+  var builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]);
+
+  if (type === "comparison") {
+    var op = options.operator || "greaterThan";
+    var val = options.value;
+    var condMap = {
+      "greaterThan": SpreadsheetApp.BooleanCriteria.NUMBER_GREATER_THAN,
+      "lessThan": SpreadsheetApp.BooleanCriteria.NUMBER_LESS_THAN,
+      "equalTo": SpreadsheetApp.BooleanCriteria.NUMBER_EQUAL_TO,
+      "greaterThanOrEqualTo": SpreadsheetApp.BooleanCriteria.NUMBER_GREATER_THAN_OR_EQUAL_TO,
+      "lessThanOrEqualTo": SpreadsheetApp.BooleanCriteria.NUMBER_LESS_THAN_OR_EQUAL_TO,
+      "notEqualTo": SpreadsheetApp.BooleanCriteria.NUMBER_NOT_EQUAL_TO,
+      "between": SpreadsheetApp.BooleanCriteria.NUMBER_BETWEEN
+    };
+    var crit = condMap[op];
+    if (!crit) return "Unknown operator: " + op;
+
+    if (op === "between") {
+      builder.whenNumberBetween(val, options.valueTo);
+    } else {
+      builder.whenCellNotEmpty(); // fallback
+      // Use specific when* methods based on criteria
+      if (op === "greaterThan") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberGreaterThan(val);
+      else if (op === "lessThan") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberLessThan(val);
+      else if (op === "equalTo") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberEqualTo(val);
+      else if (op === "greaterThanOrEqualTo") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberGreaterThanOrEqualTo(val);
+      else if (op === "lessThanOrEqualTo") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberLessThanOrEqualTo(val);
+      else if (op === "notEqualTo") builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenNumberNotEqualTo(val);
+    }
+  } else if (type === "text") {
+    builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range])
+      .whenTextContains(options.textContains || "");
+  } else if (type === "empty") {
+    builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenCellEmpty();
+  } else if (type === "notEmpty") {
+    builder = SpreadsheetApp.newConditionalFormatRule().setRanges([range]).whenCellNotEmpty();
+  }
+
+  // Apply formatting
+  if (options.background) builder.setBackground(options.background);
+  if (options.fontColor) builder.setFontColor(options.fontColor);
+  if (options.bold) builder.setBold(true);
+
+  var rule = builder.build();
+  var rules = sheet.getConditionalFormatRules();
+  rules.push(rule);
+  sheet.setConditionalFormatRules(rules);
+
+  return "Added conditional format rule on " + sheetName + "!" + rangeStr;
+}
+
+/**
+ * Set data validation on a range.
+ */
+function _setDataValidation(sheetName, rangeStr, options) {
+  var sheet = _getSheet(sheetName);
+  var range = sheet.getRange(rangeStr);
+  var type = options.type || "list";
+  var builder = SpreadsheetApp.newDataValidation();
+
+  switch (type) {
+    case "list":
+      builder.requireValueInList(options.values || [], true);
+      break;
+    case "number":
+      if (options.min !== undefined && options.max !== undefined) {
+        builder.requireNumberBetween(options.min, options.max);
+      } else if (options.min !== undefined) {
+        builder.requireNumberGreaterThanOrEqualTo(options.min);
+      } else if (options.max !== undefined) {
+        builder.requireNumberLessThanOrEqualTo(options.max);
+      }
+      break;
+    case "date":
+      builder.requireDate();
+      break;
+    case "checkbox":
+      builder.requireCheckbox();
+      break;
+    case "custom":
+      if (options.customFormula) {
+        builder.requireFormulaSatisfied(options.customFormula);
+      }
+      break;
+  }
+
+  if (options.allowInvalid === false) {
+    builder.setAllowInvalid(false);
+  }
+
+  range.setDataValidation(builder.build());
+  return "Set data validation (" + type + ") on " + sheetName + "!" + rangeStr;
+}
+
+// ─────────────────────────────────────────────
+// New Actions — Batch 4: Sheet Management & Search
+// ─────────────────────────────────────────────
+
+/**
+ * Rename a sheet.
+ */
+function _renameSheet(oldName, newName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(oldName);
+  if (!sheet) return "Sheet not found: " + oldName;
+  sheet.setName(newName);
+  return "Renamed sheet '" + oldName + "' to '" + newName + "'";
+}
+
+/**
+ * Copy/duplicate a sheet within the spreadsheet.
+ */
+function _copySheet(sourceName, newName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sourceName);
+  if (!sheet) return "Sheet not found: " + sourceName;
+  var copy = sheet.copyTo(ss);
+  copy.setName(newName);
+  return "Copied sheet '" + sourceName + "' as '" + newName + "'";
+}
+
+/**
+ * Delete a sheet. Guards against deleting the last sheet.
+ */
+function _deleteSheet(name) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) return "Sheet not found: " + name;
+  if (ss.getSheets().length <= 1) return "Cannot delete the last sheet";
+  ss.deleteSheet(sheet);
+  return "Deleted sheet '" + name + "'";
+}
+
+/**
+ * Find and replace text in a sheet or range.
+ */
+function _findReplace(sheetName, findText, replaceText, rangeStr, matchCase) {
+  var sheet = _getSheet(sheetName);
+  var searchRange = rangeStr ? sheet.getRange(rangeStr) : sheet.getDataRange();
+  var finder = searchRange.createTextFinder(findText);
+
+  if (matchCase) {
+    finder.matchCase(true);
+  }
+
+  var count = finder.replaceAllWith(replaceText);
+  return "Replaced " + count + " occurrence(s) of '" + findText + "' with '" + replaceText + "' in " + sheet.getName();
 }
 
 /**

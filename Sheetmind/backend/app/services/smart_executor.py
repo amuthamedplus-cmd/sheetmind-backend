@@ -29,6 +29,7 @@ class RequestType(str, Enum):
     FIND_DUPLICATES = "find_duplicates"      # Find duplicate rows
     FILTER_HIGHLIGHT = "filter_highlight"    # Filter and highlight
     COMPARISON = "comparison"                # Compare A vs B
+    CHANGE_CHART_TYPE = "change_chart_type"  # Modify existing chart type
     COMPLEX = "complex"                      # Custom - use plan+execute
 
 
@@ -46,6 +47,7 @@ class ClassifiedRequest:
     duplicate_columns: Optional[List[str]] = None  # Column letters to check, None = all
     custom_plan: Optional[List[Dict]] = None
     answer: Optional[str] = None       # for simple questions
+    summary_sheet: Optional[str] = None  # sheet name where chart exists
 
 
 # =============================================================================
@@ -356,6 +358,7 @@ Classify into ONE of these types:
 5. find_duplicates - Find duplicate rows. Include "duplicate_columns" (list of column letters to check, or null for all columns)
 6. filter_highlight - Filter and highlight rows
 7. complex - Anything else that needs custom handling
+8. change_chart_type - User refers to an existing chart and wants a different chart type. Include "chart_type" and "summary_sheet" (the sheet name from conversation history where the chart was created).
 
 RESPOND IN EXACT JSON FORMAT:
 {{
@@ -495,6 +498,10 @@ class SmartExecutor:
             actions, chart_config = self._execute_grouped_summary_chart(classified, sheet_metadata, cells or {})
             response = f"Created summary with {classified.chart_type} chart."
 
+        elif classified.request_type == RequestType.CHANGE_CHART_TYPE:
+            actions, chart_config = self._execute_change_chart_type(classified, sheet_metadata, cells or {})
+            response = f"Changed chart to {classified.chart_type or 'line'}."
+
         elif classified.request_type == RequestType.FIND_DUPLICATES:
             actions, response, chart_config = self._execute_find_duplicates(classified, sheet_metadata, cells or {})
 
@@ -626,7 +633,8 @@ class SmartExecutor:
                 filter_value=data.get('filter_value'),
                 duplicate_columns=data.get('duplicate_columns'),
                 custom_plan=data.get('plan'),
-                answer=data.get('answer')
+                answer=data.get('answer'),
+                summary_sheet=data.get('summary_sheet'),
             )
 
         except Exception as e:
@@ -719,6 +727,56 @@ class SmartExecutor:
             classified.aggregation or 'sum',
             chart_type=classified.chart_type or 'bar',
         )
+
+        return actions, chart_config
+
+    def _execute_change_chart_type(
+        self,
+        classified: ClassifiedRequest,
+        metadata: Dict,
+        cells: Dict,
+    ) -> tuple:
+        """Change an existing chart's type without recreating summary data.
+        Returns (actions, chart_config)."""
+        summary_sheet = classified.summary_sheet
+
+        # Fallback: derive summary sheet name from metadata columns
+        if not summary_sheet:
+            group_col = classified.group_by_column
+            if group_col:
+                for col in metadata.get('columns', []):
+                    if col.get('letter') == group_col:
+                        summary_sheet = col.get('header', 'Category') + " Summary"
+                        break
+            if not summary_sheet:
+                summary_sheet = metadata.get('sheet_name', 'Sheet1') + " Summary"
+
+        chart_type = classified.chart_type or "line"
+
+        actions = [
+            {"action": "deleteCharts", "sheet": summary_sheet},
+            {
+                "action": "createChart",
+                "chartType": chart_type,
+                "title": "Chart",
+                "dataSheet": summary_sheet,
+                "labelColumn": "A",
+                "valueColumn": "B",
+                "startRow": 2,
+                "endRow": 100,
+            },
+        ]
+
+        # Build inline chart from cells if we have context
+        chart_config = None
+        group_col = classified.group_by_column
+        value_col = classified.value_column
+        if group_col and value_col:
+            chart_config = self._build_inline_chart_from_cells(
+                cells, group_col, value_col, "Value",
+                classified.aggregation or "sum",
+                chart_type=chart_type,
+            )
 
         return actions, chart_config
 

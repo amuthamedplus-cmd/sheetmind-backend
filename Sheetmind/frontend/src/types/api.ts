@@ -63,7 +63,16 @@ export interface ChatRequest {
 
 export interface SheetAction {
   action: "filter" | "sort" | "highlight" | "setValue" | "insertColumn" |
-    "createSheet" | "setFormula" | "setValues" | "autoFillDown" | "formatRange" | "readRange";
+    "createSheet" | "setFormula" | "setValues" | "autoFillDown" | "formatRange" | "readRange" |
+    "deleteCharts" | "createChart" |
+    // Batch 1: Formatting
+    "numberFormat" | "setBorders" | "freeze" | "autoResize" |
+    // Batch 2: Row/Column/Data ops
+    "deleteRows" | "deleteColumns" | "mergeCells" | "clearRange" | "copyRange" |
+    // Batch 3: Conditional formatting & validation
+    "conditionalFormat" | "dataValidation" |
+    // Batch 4: Sheet management & search
+    "renameSheet" | "copySheet" | "deleteSheet" | "findReplace";
   column?: string;
   criteria?: string;
   ascending?: boolean;
@@ -83,6 +92,63 @@ export interface SheetAction {
   bold?: boolean;
   background?: string;
   fontColor?: string;
+  // Extended formatRange fields
+  italic?: boolean;
+  strikethrough?: boolean;
+  fontSize?: number;
+  fontFamily?: string;
+  horizontalAlignment?: "left" | "center" | "right";
+  verticalAlignment?: "top" | "middle" | "bottom";
+  wrapStrategy?: "WRAP" | "OVERFLOW" | "CLIP";
+  // numberFormat fields
+  format?: string;
+  decimals?: number;
+  currencySymbol?: string;
+  customPattern?: string;
+  // setBorders fields
+  style?: string;
+  weight?: string;
+  // freeze fields
+  rows?: number | number[];
+  columns?: string[] | number;
+  // mergeCells fields
+  type?: string;
+  // clearRange fields — uses 'type' field above
+  // copyRange fields
+  sourceSheet?: string;
+  sourceRange?: string;
+  destSheet?: string;
+  destCell?: string;
+  valuesOnly?: boolean;
+  // conditionalFormat fields
+  operator?: string;
+  valueTo?: string;
+  textContains?: string;
+  colorScaleMin?: string;
+  colorScaleMid?: string;
+  colorScaleMax?: string;
+  // dataValidation fields
+  allowInvalid?: boolean;
+  customFormula?: string;
+  min?: number;
+  max?: number;
+  // renameSheet fields
+  oldName?: string;
+  newName?: string;
+  // copySheet fields
+  source?: string;
+  // findReplace fields
+  find?: string;
+  replace?: string;
+  matchCase?: boolean;
+  // Chart fields
+  chartType?: string;
+  title?: string;
+  dataSheet?: string;
+  labelColumn?: string;
+  valueColumn?: string;
+  startRow?: number;
+  endRow?: number;
 }
 
 export interface StepAction {
