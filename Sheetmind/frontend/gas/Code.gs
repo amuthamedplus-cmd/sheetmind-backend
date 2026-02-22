@@ -181,7 +181,17 @@ function executeSheetAction(action) {
     case "chart":
       return _createChart(action.type || "BAR", action.dataRange, action.title);
     case "createChart":
-      return _createChartFromColumns(action.chartType, action.title, action.dataSheet, action.labelColumn, action.valueColumn, action.startRow, action.endRow);
+      // Normalize parameter names — AI may use different formats:
+      //   Format A (template): chartType, dataSheet, labelColumn, valueColumn, startRow, endRow
+      //   Format B (AI freeform): type, sheet, range
+      var chartType = action.chartType || action.type || "bar";
+      var chartSheet = action.dataSheet || action.sheet;
+      var chartTitle = action.title || "Chart";
+      if (action.range && !action.labelColumn) {
+        // Format B: range-based (e.g., "A1:C100") — use _createChart on the target sheet
+        return _createChartOnSheet(chartType, chartTitle, chartSheet, action.range);
+      }
+      return _createChartFromColumns(chartType, chartTitle, chartSheet, action.labelColumn, action.valueColumn, action.startRow, action.endRow);
     // Agent-style actions
     case "createSheet":
       return createSheet(action.name);
@@ -349,6 +359,48 @@ function _createChart(chartType, dataRangeStr, title) {
   sheet.insertChart(chart);
 
   return "Created " + (chartType || "BAR") + " chart from " + range.getA1Notation();
+}
+
+/**
+ * Create a chart on a specific sheet using a range string.
+ * Handles AI freeform format: {action:"createChart", sheet:"X", range:"A1:C100", type:"column"}
+ */
+function _createChartOnSheet(chartType, title, sheetName, rangeStr) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = sheetName ? ss.getSheetByName(sheetName) : ss.getActiveSheet();
+
+  if (!sheet) {
+    return "Sheet not found: " + sheetName;
+  }
+
+  // Use provided range, or fall back to full data range
+  var range = sheet.getRange(rangeStr || sheet.getDataRange().getA1Notation());
+
+  var typeMap = {
+    "bar": Charts.ChartType.BAR,
+    "column": Charts.ChartType.COLUMN,
+    "line": Charts.ChartType.LINE,
+    "pie": Charts.ChartType.PIE,
+    "doughnut": Charts.ChartType.PIE,
+    "scatter": Charts.ChartType.SCATTER,
+    "area": Charts.ChartType.AREA
+  };
+
+  var type = typeMap[(chartType || "bar").toLowerCase()] || Charts.ChartType.BAR;
+
+  var chart = sheet.newChart()
+    .setChartType(type)
+    .addRange(range)
+    .setPosition(2, range.getLastColumn() + 2, 0, 0)
+    .setOption("title", title || "Chart")
+    .setOption("width", 500)
+    .setOption("height", 350)
+    .setOption("legend", {position: "bottom"})
+    .build();
+
+  sheet.insertChart(chart);
+
+  return "Created " + (chartType || "bar") + " chart '" + title + "' on " + sheet.getName() + " from " + rangeStr;
 }
 
 /**
