@@ -42,10 +42,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
 # Run application with production settings
-# 4 workers × 20 threads each = 80 concurrent AI calls capacity
+# 2 workers for Render free tier (512MB RAM) — scale up on paid plan
 # --limit-max-requests: recycle workers after N requests to prevent memory leaks
 # --timeout-keep-alive: keep connections open for sidebar long-polling
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--workers", "4", \
+     "--workers", "2", \
      "--limit-max-requests", "5000", \
      "--timeout-keep-alive", "30"]
