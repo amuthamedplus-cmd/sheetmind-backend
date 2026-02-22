@@ -256,8 +256,9 @@ Rules:
 # Model configuration
 # ---------------------------------------------------------------------------
 
-# Primary: Gemini via Google AI direct API (fastest, no proxy overhead)
-# Fallback chain: OpenRouter Gemini -> GPT-4o-mini via OpenRouter
+# Primary: Arcee Trinity via OpenRouter (free tier)
+# Fallback chain: Gemini direct -> OpenRouter Gemini -> GPT-4o-mini
+PRIMARY_OR_MODEL = "arcee-ai/trinity-large-preview:free"
 PRIMARY_MODEL = "gemini-2.0-flash"
 FALLBACK_MODEL = "google/gemini-2.0-flash-001"
 GPT_FALLBACK_MODEL = "openai/gpt-4o-mini"
@@ -487,10 +488,22 @@ def _call_with_fallback(
     label: str = "",
     history: list[dict] | None = None,
 ) -> str:
-    """Try Gemini direct first, with refusal retry, then OpenRouter Gemini,
+    """Try Arcee Trinity first, then Gemini direct, then OpenRouter Gemini,
     then GPT-4o-mini as final fallback."""
 
-    # --- Attempt 1: Gemini direct ---
+    # --- Attempt 1: Arcee Trinity via OpenRouter (free) ---
+    try:
+        result = _call_model(
+            PRIMARY_OR_MODEL, system_prompt, user_message, context,
+            _get_openrouter_client(), history,
+        )
+        if not _is_refusal(result):
+            return result
+        logger.warning(f"Arcee Trinity refused{' for ' + label if label else ''}, trying Gemini")
+    except Exception as e:
+        logger.warning(f"Arcee Trinity failed{' for ' + label if label else ''}: {e}")
+
+    # --- Attempt 2: Gemini direct ---
     if settings.GEMINI_API_KEY and settings.GEMINI_ENABLED:
         try:
             result = _call_model(
@@ -518,7 +531,7 @@ def _call_with_fallback(
         except Exception as e:
             logger.warning(f"Gemini direct failed{' for ' + label if label else ''}: {e}")
 
-    # --- Attempt 2: OpenRouter Gemini ---
+    # --- Attempt 3: OpenRouter Gemini ---
     try:
         result = _call_model(
             FALLBACK_MODEL, system_prompt, user_message, context,
@@ -530,7 +543,7 @@ def _call_with_fallback(
     except Exception as e:
         logger.warning(f"OpenRouter Gemini failed{' for ' + label if label else ''}: {e}")
 
-    # --- Attempt 3: GPT-4o-mini via OpenRouter (Phase 1D) ---
+    # --- Attempt 4: GPT-4o-mini via OpenRouter ---
     try:
         result = _call_model(
             GPT_FALLBACK_MODEL, system_prompt, user_message, context,

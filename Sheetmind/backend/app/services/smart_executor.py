@@ -340,6 +340,12 @@ Given the user's request and sheet metadata, classify it and extract parameters.
 SHEET METADATA:
 {sheet_metadata}
 
+DATA SAMPLE (first rows):
+{data_sample}
+
+CONVERSATION HISTORY:
+{history}
+
 USER REQUEST: "{user_request}"
 
 Classify into ONE of these types:
@@ -395,7 +401,9 @@ class SmartExecutor:
     def classify_request(
         self,
         user_request: str,
-        sheet_metadata: Dict
+        sheet_metadata: Dict,
+        history: list = None,
+        cells: Dict = None,
     ) -> ClassifiedRequest:
         """
         Classify user request in ONE LLM call.
@@ -406,10 +414,28 @@ class SmartExecutor:
         # Format metadata for prompt
         metadata_str = self._format_metadata(sheet_metadata)
 
+        # Format conversation history (last 3 exchanges, 200 chars each)
+        history_str = "No prior conversation."
+        if history:
+            recent = history[-6:]  # last 3 exchanges (6 messages)
+            lines = []
+            for msg in recent:
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")[:200]
+                lines.append(f"{role}: {content}")
+            history_str = "\n".join(lines)
+
+        # Build data sample from first 5 data rows
+        data_sample_str = "No cell data available."
+        if cells:
+            data_sample_str = self._build_data_sample(cells, sheet_metadata)
+
         # Build prompt
         prompt = CLASSIFIER_PROMPT.format(
             sheet_metadata=metadata_str,
-            user_request=user_request
+            user_request=user_request,
+            history=history_str,
+            data_sample=data_sample_str,
         )
 
         # Call LLM
@@ -433,6 +459,7 @@ class SmartExecutor:
         user_request: str,
         sheet_metadata: Dict,
         cells: Dict = None,
+        history: list = None,
     ) -> Dict[str, Any]:
         """
         Execute user request with minimal LLM calls.
@@ -445,7 +472,10 @@ class SmartExecutor:
             - chart_config: Optional Chart.js config for inline display
         """
         # Step 1: Classify (1 LLM call)
-        classified = self.classify_request(user_request, sheet_metadata)
+        classified = self.classify_request(
+            user_request, sheet_metadata,
+            history=history, cells=cells,
+        )
 
         llm_calls = 1
         actions = []
@@ -520,6 +550,54 @@ class SmartExecutor:
 
         return "\n".join(lines)
 
+    def _build_data_sample(self, cells: Dict, metadata: Dict) -> str:
+        """Build a table of the first 5 data rows for the classifier prompt."""
+        if not cells:
+            return "No cell data available."
+
+        cell_pattern = re.compile(r"^([A-Z]+)(\d+)$")
+
+        # Collect all columns and rows
+        col_rows: Dict[str, Dict[int, str]] = {}  # col_letter -> {row -> value}
+        for ref, val in cells.items():
+            m = cell_pattern.match(ref)
+            if not m:
+                continue
+            col = m.group(1)
+            row = int(m.group(2))
+            if col not in col_rows:
+                col_rows[col] = {}
+            col_rows[col][row] = str(val)
+
+        if not col_rows:
+            return "No cell data available."
+
+        # Sort columns alphabetically
+        sorted_cols = sorted(col_rows.keys())
+
+        # Build header row (row 1) and first 5 data rows (rows 2-6)
+        rows_to_show = [1, 2, 3, 4, 5, 6]
+        lines = []
+        header_parts = ["Row"]
+        for col in sorted_cols:
+            header_val = col_rows.get(col, {}).get(1, col)
+            header_parts.append(f"{col}:{header_val}")
+        lines.append(" | ".join(header_parts))
+        lines.append("-" * len(lines[0]))
+
+        for row in rows_to_show[1:]:  # skip row 1 (header)
+            parts = [str(row)]
+            has_data = False
+            for col in sorted_cols:
+                val = col_rows.get(col, {}).get(row, "")
+                if val:
+                    has_data = True
+                parts.append(str(val)[:30])  # truncate long values
+            if has_data:
+                lines.append(" | ".join(parts))
+
+        return "\n".join(lines) if len(lines) > 2 else "No cell data available."
+
     def _parse_classification(self, response_text: str) -> ClassifiedRequest:
         """Parse LLM classification response."""
         try:
@@ -562,9 +640,11 @@ class SmartExecutor:
         cells: Dict = None,
     ) -> tuple:
         """Execute grouped summary template. Returns (actions, chart_config)."""
-        # Find column info
-        group_col = classified.group_by_column or "A"
-        value_col = classified.value_column or "B"
+        # Find column info — use metadata suggestions instead of hardcoded A/B
+        suggested_group = metadata.get('suggested_group_by', [])
+        suggested_agg = metadata.get('suggested_aggregate', [])
+        group_col = classified.group_by_column or (suggested_group[0] if suggested_group else "A")
+        value_col = classified.value_column or (suggested_agg[0] if suggested_agg else "B")
 
         # Get headers from metadata
         group_header = "Category"
@@ -604,8 +684,11 @@ class SmartExecutor:
         cells: Dict = None,
     ) -> tuple:
         """Execute grouped summary with chart template. Returns (actions, chart_config)."""
-        group_col = classified.group_by_column or "A"
-        value_col = classified.value_column or "B"
+        # Use metadata suggestions instead of hardcoded A/B
+        suggested_group = metadata.get('suggested_group_by', [])
+        suggested_agg = metadata.get('suggested_aggregate', [])
+        group_col = classified.group_by_column or (suggested_group[0] if suggested_group else "A")
+        value_col = classified.value_column or (suggested_agg[0] if suggested_agg else "B")
 
         group_header = "Category"
         value_header = "Value"

@@ -64,6 +64,13 @@ CRITICAL VALUES FROM METADATA (DO NOT GUESS THESE):
 - Columns good for grouping (categorical): {group_columns}
 - Columns good for SUM/AVG (numeric): {numeric_columns}
 
+**MANDATORY: NEVER assume column positions.**
+- The metadata above shows EXACTLY which columns contain what data
+- Column A is NOT always the grouping column — CHECK the metadata
+- Column B is NOT always the value column — CHECK the metadata
+- Use the "Good for grouping" and "Good for SUM/AVG" columns listed above
+- If unsure, call get_headers first to verify column layout
+
 CURRENT SPREADSHEET CONTEXT:
 {sheet_context}
 
@@ -178,16 +185,24 @@ class SheetMindAgent:
             )
             self._llm_source = "gemini_direct"
         else:
-            # Use OpenRouter
+            # Use OpenRouter — Arcee Trinity (free) as primary
             from langchain_openai import ChatOpenAI
             self.llm = ChatOpenAI(
+                model="arcee-ai/trinity-large-preview:free",
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url="https://openrouter.ai/api/v1",
+                temperature=0.2,
+                max_tokens=2048,
+            )
+            self._llm_source = "openrouter_arcee"
+            # Gemini fallback LLM (used if primary fails)
+            self._fallback_llm = ChatOpenAI(
                 model="google/gemini-2.0-flash-001",
                 api_key=settings.OPENROUTER_API_KEY,
                 base_url="https://openrouter.ai/api/v1",
                 temperature=0.2,
                 max_tokens=2048,
             )
-            self._llm_source = "openrouter"
 
         # Conversation memory (remembers last N exchanges)
         self.memory = ConversationBufferWindowMemory(
@@ -339,26 +354,55 @@ class SheetMindAgent:
             if pairs:
                 logger.info(f"Pre-populated memory with {len(pairs)} exchanges from DB history")
 
+        # Classify formula intent for dynamic category docs injection
+        detected_categories = classify_formula_intent(message)
+        category_docs = get_category_docs(detected_categories) if detected_categories else ""
+
+        invoke_input = {
+            "input": message,
+            "sheet_context": context_str,
+            "sheet_metadata": metadata_str,
+            "sheet_name": effective_sheet_name,
+            "last_row": str(last_row),
+            "group_columns": group_columns,
+            "numeric_columns": numeric_columns,
+            "formula_patterns_summary": get_all_patterns_summary(),
+            "mini_cheat_sheet": get_mini_cheat_sheet(),
+            "category_formula_docs": category_docs,
+        }
+
         try:
-            # Run the agent with pre-analyzed metadata
+            # Run the agent — try primary LLM, fall back to Gemini if available
             agent_start = time.time()
-
-            # Classify formula intent for dynamic category docs injection
-            detected_categories = classify_formula_intent(message)
-            category_docs = get_category_docs(detected_categories) if detected_categories else ""
-
-            result = self.executor.invoke({
-                "input": message,
-                "sheet_context": context_str,
-                "sheet_metadata": metadata_str,
-                "sheet_name": effective_sheet_name,
-                "last_row": str(last_row),
-                "group_columns": group_columns,
-                "numeric_columns": numeric_columns,
-                "formula_patterns_summary": get_all_patterns_summary(),
-                "mini_cheat_sheet": get_mini_cheat_sheet(),
-                "category_formula_docs": category_docs,
-            })
+            try:
+                result = self.executor.invoke(invoke_input)
+            except Exception as primary_err:
+                if hasattr(self, '_fallback_llm'):
+                    logger.warning(
+                        f"Primary LLM ({self._llm_source}) failed: {primary_err}, "
+                        f"retrying with Gemini fallback"
+                    )
+                    clear_pending_actions()
+                    self.agent = create_react_agent(
+                        llm=self._fallback_llm,
+                        tools=ALL_TOOLS,
+                        prompt=REACT_PROMPT,
+                    )
+                    self.executor = AgentExecutor(
+                        agent=self.agent,
+                        tools=ALL_TOOLS,
+                        memory=self.memory,
+                        verbose=settings.DEBUG,
+                        max_iterations=15,
+                        max_execution_time=60,
+                        handle_parsing_errors=True,
+                        return_intermediate_steps=True,
+                    )
+                    self._llm_source = "openrouter_gemini_fallback"
+                    result = self.executor.invoke(invoke_input)
+                    timing["used_fallback"] = True
+                else:
+                    raise
             timing["agent_ms"] = int((time.time() - agent_start) * 1000)
 
             # Extract reasoning steps from intermediate_steps

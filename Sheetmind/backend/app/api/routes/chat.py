@@ -671,10 +671,10 @@ async def chat_query(
                 metadata = analyze_sheet(cells, effective_sheet_name or "Sheet1")
                 metadata_dict = metadata.to_dict()
 
-                # Create SmartExecutor with LLM
+                # Create SmartExecutor with primary LLM (Arcee Trinity)
                 from langchain_openai import ChatOpenAI
                 llm = ChatOpenAI(
-                    model="google/gemini-2.0-flash-001",
+                    model="arcee-ai/trinity-large-preview:free",
                     api_key=settings.OPENROUTER_API_KEY,
                     base_url="https://openrouter.ai/api/v1",
                     temperature=0.1,
@@ -682,27 +682,32 @@ async def chat_query(
                 )
                 executor = SmartExecutor(llm)
 
-                # Enrich short messages with conversation context for SmartExecutor
-                smart_message = request.message
-                if history and len(request.message.strip()) <= 20:
-                    last_exchanges = []
-                    for msg in history[-4:]:  # last 2 exchanges
-                        role = msg.get("role", "")
-                        content = msg.get("content", "")[:300]
-                        if role and content:
-                            last_exchanges.append(f"{role}: {content}")
-                    if last_exchanges:
-                        smart_message = (
-                            "Previous conversation:\n"
-                            + "\n".join(last_exchanges)
-                            + f"\n\nCurrent request: {request.message}"
+                # Try smart execution — primary first, Gemini fallback
+                try:
+                    smart_result = await loop.run_in_executor(
+                        _bg_executor,
+                        lambda: executor.execute(
+                            request.message, metadata_dict,
+                            cells=cells, history=history,
                         )
-
-                # Try smart execution
-                smart_result = await loop.run_in_executor(
-                    _bg_executor,
-                    lambda: executor.execute(smart_message, metadata_dict, cells=cells)
-                )
+                    )
+                except Exception as primary_err:
+                    logger.warning(f"SmartExecutor primary (Arcee) failed: {primary_err}, trying Gemini")
+                    fallback_llm = ChatOpenAI(
+                        model="google/gemini-2.0-flash-001",
+                        api_key=settings.OPENROUTER_API_KEY,
+                        base_url="https://openrouter.ai/api/v1",
+                        temperature=0.1,
+                        max_tokens=2048,
+                    )
+                    executor = SmartExecutor(fallback_llm)
+                    smart_result = await loop.run_in_executor(
+                        _bg_executor,
+                        lambda: executor.execute(
+                            request.message, metadata_dict,
+                            cells=cells, history=history,
+                        )
+                    )
 
                 # Check if it succeeded or needs full agent
                 if smart_result.get("request_type") == "complex" and not smart_result.get("actions"):
