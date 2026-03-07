@@ -33,7 +33,7 @@ function Section({ id, num, title, icon, children }: {
   return (
     <div id={id} className="py-10 border-b border-slate-100 last:border-0 scroll-mt-24">
       <div className="flex items-start gap-4 mb-4">
-        <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">
+        <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
           {icon}
         </div>
         <div>
@@ -70,36 +70,55 @@ export default function TermsPage() {
     <main className="min-h-screen overflow-x-hidden">
       <Navbar />
 
-      {/* Hero header */}
-      <div className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 pt-28 lg:pt-36 pb-14 overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(16,185,129,0.12)_0,transparent_60%)] pointer-events-none" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(5,150,105,0.08)_0,transparent_60%)] pointer-events-none" />
-        <div className="relative max-w-3xl mx-auto px-6 lg:px-8">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-700/60 border border-slate-600/50 text-slate-300 text-sm font-medium mb-5">
+      {/* Hero — matches About/Contact pattern */}
+      <section className="pt-28 lg:pt-36 pb-16 relative overflow-hidden">
+        <div className="absolute inset-0 bg-hero-mesh pointer-events-none" />
+        <div className="relative max-w-3xl mx-auto px-6 lg:px-8 text-center">
+          <div className="pill-badge mx-auto mb-4 w-fit">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
             </svg>
             Terms of Service
           </div>
-          <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-white tracking-tight mb-4">
-            Simple, plain-language terms
+          <h1 className="font-display font-extrabold text-4xl sm:text-5xl text-slate-900 tracking-tight mb-4">
+            Simple, <span className="text-gradient">plain-language</span> terms
           </h1>
-          <p className="text-slate-400 mb-6">Last updated: February 17, 2026</p>
+          <p className="text-slate-500 max-w-xl mx-auto leading-relaxed mb-3">
+            We wrote these to be readable. If something isn&apos;t clear, just ask.
+          </p>
+          <p className="text-sm text-slate-400">Last updated: February 17, 2026</p>
         </div>
-      </div>
+      </section>
 
       {/* TL;DR summary */}
-      <div className="bg-slate-50 border-b border-slate-200/60">
+      <div className="bg-slate-50/50 border-y border-slate-100">
         <div className="max-w-3xl mx-auto px-6 lg:px-8 py-8">
           <p className="text-xs font-display font-semibold uppercase tracking-widest text-slate-400 mb-4">TL;DR — The short version</p>
           <div className="grid sm:grid-cols-3 gap-4">
             {[
-              { icon: '✅', text: 'Use SheetMind for legitimate work on data you own or have rights to.' },
-              { icon: '💳', text: 'Paid plans are billed monthly or annually. Cancel anytime — takes effect at period end.' },
-              { icon: '🤖', text: 'AI outputs may have errors. Always review before relying on them. You stay responsible.' },
-            ].map((item) => (
-              <div key={item.text} className="flex items-start gap-3 bg-white rounded-xl p-4 border border-slate-200/60 shadow-sm">
-                <span className="text-xl flex-shrink-0">{item.icon}</span>
+              {
+                icon: (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+                ),
+                text: 'Use SheetMind for legitimate work on data you own or have rights to.',
+              },
+              {
+                icon: (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><rect x="1" y="4" width="22" height="16" rx="2" /><path d="M1 10h22" /></svg>
+                ),
+                text: 'Paid plans billed monthly or annually. Cancel anytime — takes effect at period end.',
+              },
+              {
+                icon: (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16.4 5.6 21.2 8 14 2 9.2h7.6L12 2Z" /></svg>
+                ),
+                text: 'AI outputs may have errors. Always review before relying on them.',
+              },
+            ].map((item, i) => (
+              <div key={i} className="glass-card rounded-2xl p-4 flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  {item.icon}
+                </div>
                 <p className="text-sm text-slate-600 leading-relaxed">{item.text}</p>
               </div>
             ))}
@@ -126,12 +145,10 @@ export default function TermsPage() {
                   </a>
                 ))}
               </nav>
-              <div className="mt-8 p-4 rounded-xl bg-slate-50 border border-slate-200/60">
+              <div className="mt-8 p-4 rounded-xl bg-emerald-50 border border-emerald-100">
                 <p className="text-xs text-slate-500 leading-relaxed">
                   Legal questions?{' '}
-                  <a href="mailto:legal@sheetmind.xyz" className="text-emerald-600 font-medium hover:underline">
-                    Email us
-                  </a>
+                  <a href="mailto:legal@sheetmind.xyz" className="text-emerald-600 font-medium hover:underline">Email us</a>
                 </p>
               </div>
             </div>
@@ -153,7 +170,7 @@ export default function TermsPage() {
             </Section>
 
             <Section id="account" num="Section 3" title="Account Registration" icon={
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
             }>
               <P>To use the Service, you must create an account using a valid email address or Google authentication. You are responsible for maintaining the security of your account credentials. You must be at least 18 years old to use the Service.</P>
             </Section>
@@ -176,11 +193,11 @@ export default function TermsPage() {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="1" y="4" width="22" height="16" rx="2" /><path d="M1 10h22" /></svg>
             }>
               <P>SheetMind offers Free, Pro, and Team subscription tiers. Paid subscriptions are billed monthly or annually. You may cancel at any time — cancellation takes effect at the end of the current billing period. No refunds are provided for partial billing periods.</P>
-              <div className="mt-4 flex gap-3 p-4 rounded-xl bg-blue-50 border border-blue-100">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" className="flex-shrink-0 mt-0.5">
+              <div className="mt-3 flex gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-100">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2" strokeLinecap="round" className="flex-shrink-0 mt-0.5">
                   <circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" />
                 </svg>
-                <p className="text-sm text-blue-800">Cancel anytime — no lock-in. The Free plan is free forever.</p>
+                <p className="text-sm text-emerald-800">Cancel anytime — no lock-in. The Free plan is free forever.</p>
               </div>
             </Section>
 
@@ -194,11 +211,7 @@ export default function TermsPage() {
             <Section id="privacy" num="Section 7" title="Data & Privacy" icon={
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
             }>
-              <P>
-                Your use of the Service is also governed by our{' '}
-                <a href="/privacy" className="text-emerald-600 font-medium hover:underline">Privacy Policy</a>.
-                By using the Service, you consent to the collection and use of data as described in the Privacy Policy.
-              </P>
+              <P>Your use of the Service is also governed by our <a href="/privacy" className="text-emerald-600 font-medium hover:underline">Privacy Policy</a>. By using the Service, you consent to the collection and use of data as described in the Privacy Policy.</P>
             </Section>
 
             <Section id="ip" num="Section 8" title="Intellectual Property" icon={
@@ -210,7 +223,7 @@ export default function TermsPage() {
             <Section id="liability" num="Section 9" title="Limitation of Liability" icon={
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><path d="M12 9v4M12 17h.01" /></svg>
             }>
-              <P>SheetMind is provided &quot;as is&quot; without warranty of any kind. We are not liable for any damages arising from the use of the Service, including but not limited to data loss, incorrect AI outputs, or service interruptions.</P>
+              <P>SheetMind is provided &quot;as is&quot; without warranty of any kind. We are not liable for any damages arising from use of the Service, including data loss, incorrect AI outputs, or service interruptions.</P>
               <P>Our total liability is limited to the amount you paid for the Service in the 12 months preceding the claim.</P>
             </Section>
 
@@ -228,16 +241,11 @@ export default function TermsPage() {
                   <p className="font-display font-semibold text-slate-900 mb-1">Legal questions?</p>
                   <p className="text-sm text-slate-500">We&apos;ll respond within 2 business days.</p>
                 </div>
-                <a
-                  href="mailto:legal@sheetmind.xyz"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-display font-semibold text-sm text-white bg-gradient-to-r from-emerald-600 to-emerald-500 hover:-translate-y-0.5 shadow-md shadow-emerald-500/20 transition-all duration-300"
-                >
+                <a href="mailto:legal@sheetmind.xyz" className="btn-primary text-sm">
                   legal@sheetmind.xyz
                 </a>
               </div>
-              <p className="mt-6 text-sm text-slate-400">
-                Also see our <a href="/privacy" className="text-emerald-600 hover:underline">Privacy Policy</a>.
-              </p>
+              <p className="mt-6 text-sm text-slate-400">Also see our <a href="/privacy" className="text-emerald-600 hover:underline">Privacy Policy</a>.</p>
             </Section>
 
           </article>

@@ -95,7 +95,7 @@ export default function TrustBar() {
   const doubled = [...items, ...items]
 
   return (
-    <section className="py-12 border-y border-slate-100 bg-slate-50/50 overflow-hidden">
+    <section className="hidden sm:block py-12 border-y border-slate-100 bg-slate-50/50 overflow-hidden">
       <p className="text-center text-xs font-display font-semibold uppercase tracking-[0.2em] text-slate-400 mb-8">
         Trusted by spreadsheet professionals
       </p>

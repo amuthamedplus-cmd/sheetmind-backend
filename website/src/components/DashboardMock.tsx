@@ -122,12 +122,12 @@ export default function DashboardMock() {
         </div>
 
         {/* Formula bar */}
-        <div className="bg-white border-b border-slate-200/60 px-2 sm:px-3 py-1.5 flex items-center gap-1.5 sm:gap-2">
-          <span className="text-[11px] font-mono text-[#5f6368] bg-white px-1.5 sm:px-2 py-0.5 rounded border border-slate-200 min-w-[32px] sm:min-w-[36px] text-center flex-shrink-0">B4</span>
+        <div className="bg-white border-b border-slate-200/60 px-2 sm:px-3 py-1.5 flex items-center gap-1.5 sm:gap-2 min-w-0">
+          <span className="text-[11px] font-mono text-[#5f6368] bg-white px-1.5 sm:px-2 py-0.5 rounded border border-slate-200 min-w-[32px] sm:min-w-[36px] text-center flex-shrink-0">B9</span>
           <div className="w-px h-4 bg-slate-200 flex-shrink-0" />
           <span className="text-[11px] text-[#5f6368] font-medium px-1 flex-shrink-0">fx</span>
           <div className="w-px h-4 bg-slate-200 flex-shrink-0" />
-          <span className="text-[11px] text-[#5f6368] truncate">$67,800</span>
+          <span className="text-[11px] text-emerald-700 font-mono flex-1 min-w-0 truncate">=SUM(B2:B8)</span>
         </div>
 
         {/* Main content area */}
@@ -154,13 +154,13 @@ export default function DashboardMock() {
               { n: 6, cells: ['Epsilon Ltd', '$51,300', 'East', 'Active'], highlighted: true },
               { n: 7, cells: ['Zeta Group', '$39,700', 'West', 'Active'] },
               { n: 8, cells: ['Eta LLC', '$22,400', 'North', 'Active'] },
-              { n: 9, cells: ['', '', '', ''] },
+              { n: 9, cells: ['Total', '=SUM(B2:B8)', '', ''], formula: true },
               { n: 10, cells: ['', '', '', ''] },
             ].map((row) => (
               <div
                 key={row.n}
                 className={`flex border-b border-slate-100/60 ${
-                  row.highlighted ? 'bg-emerald-50/40' : row.header ? 'bg-[#f8f9fa]' : 'bg-white'
+                  row.highlighted ? 'bg-emerald-50/40' : row.header ? 'bg-[#f8f9fa]' : (row as { formula?: boolean }).formula ? 'bg-slate-50/80' : 'bg-white'
                 }`}
               >
                 <div className="w-8 sm:w-10 min-w-[32px] sm:min-w-[40px] px-1 py-1.5 text-center text-[11px] text-[#80868b] border-r border-slate-200/40 flex-shrink-0 bg-[#f8f9fa]">
@@ -169,10 +169,12 @@ export default function DashboardMock() {
                 {row.cells.map((cell, i) => (
                   <div
                     key={i}
-                    className={`flex-1 min-w-[60px] sm:min-w-[80px] px-1 sm:px-3 py-1.5 text-[10px] sm:text-[11px] border-r border-slate-100/40 truncate ${
+                    className={`flex-1 min-w-[50px] sm:min-w-[70px] px-1 sm:px-3 py-1.5 text-[10px] sm:text-[11px] border-r border-slate-100/40 truncate ${
                       row.header ? 'font-bold text-[#202124]' : 'text-[#3c4043]'
                     } ${row.highlighted && i === 1 ? 'text-emerald-700 font-semibold' : ''}
-                    ${row.highlighted ? 'ring-1 ring-inset ring-emerald-200/50' : ''}`}
+                    ${row.highlighted ? 'ring-1 ring-inset ring-emerald-200/50' : ''}
+                    ${(row as { formula?: boolean }).formula && i === 0 ? 'font-semibold text-slate-600' : ''}
+                    ${(row as { formula?: boolean }).formula && i === 1 ? 'text-emerald-700 font-mono font-medium' : ''}`}
                   >
                     {cell}
                   </div>
