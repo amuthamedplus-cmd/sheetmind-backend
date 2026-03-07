@@ -1,24 +1,9 @@
-import type { Metadata } from 'next'
+'use client'
+
+import { useState } from 'react'
 import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
 import ScrollReveal from '@/components/ScrollReveal'
-
-export const metadata: Metadata = {
-  title: 'Contact — SheetMind | Get in Touch',
-  description: 'Have questions about SheetMind? Get in touch with our team for support, sales, or partnership inquiries.',
-  alternates: {
-    canonical: '/contact',
-  },
-  openGraph: {
-    title: 'Contact — SheetMind | Get in Touch',
-    description: 'Have questions about SheetMind? Get in touch with our team for support, sales, or partnership inquiries.',
-  },
-  twitter: {
-    card: 'summary',
-    title: 'Contact — SheetMind | Get in Touch',
-    description: 'Have questions about SheetMind? Get in touch with our team for support, sales, or partnership inquiries.',
-  },
-}
 
 const contactMethods = [
   {
@@ -51,6 +36,34 @@ const contactMethods = [
 ]
 
 export default function ContactPage() {
+  const [form, setForm] = useState({ name: '', email: '', subject: 'General inquiry', message: '' })
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [errorMsg, setErrorMsg] = useState('')
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    setForm((f) => ({ ...f, [e.target.name]: e.target.value }))
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setStatus('loading')
+    setErrorMsg('')
+
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Something went wrong.')
+      setStatus('success')
+    } catch (err) {
+      setStatus('error')
+      setErrorMsg(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+    }
+  }
+
   return (
     <main className="min-h-screen">
       <Navbar />
@@ -93,53 +106,106 @@ export default function ContactPage() {
             {/* Contact form */}
             <ScrollReveal delay={100} className="lg:col-span-3">
               <div className="glass-card rounded-2xl p-8 shadow-xl shadow-slate-200/50">
-                <h2 className="font-display font-bold text-xl text-slate-900 mb-6">Send us a message</h2>
 
-                <form className="space-y-4" action="/contact">
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Name</label>
-                      <input
-                        type="text"
-                        placeholder="Your name"
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all"
-                      />
+                {status === 'success' ? (
+                  <div className="text-center py-8">
+                    <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M9 12l2 2 4-4M22 12a10 10 0 11-20 0 10 10 0 0120 0z" />
+                      </svg>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
-                      <input
-                        type="email"
-                        placeholder="you@company.com"
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all"
-                      />
-                    </div>
+                    <h2 className="font-display font-bold text-xl text-slate-900 mb-2">Message sent!</h2>
+                    <p className="text-slate-500 text-sm mb-6">
+                      Thanks for reaching out. We&apos;ve sent a confirmation to <strong>{form.email}</strong> and will reply within 24 hours.
+                    </p>
+                    <button
+                      onClick={() => { setStatus('idle'); setForm({ name: '', email: '', subject: 'General inquiry', message: '' }) }}
+                      className="btn-secondary text-sm"
+                    >
+                      Send another message
+                    </button>
                   </div>
+                ) : (
+                  <>
+                    <h2 className="font-display font-bold text-xl text-slate-900 mb-6">Send us a message</h2>
 
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Subject</label>
-                    <select className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all appearance-none cursor-pointer">
-                      <option>General inquiry</option>
-                      <option>Technical support</option>
-                      <option>Sales / Enterprise</option>
-                      <option>Partnership</option>
-                      <option>Bug report</option>
-                    </select>
-                  </div>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1.5">Name</label>
+                          <input
+                            type="text"
+                            name="name"
+                            value={form.name}
+                            onChange={handleChange}
+                            required
+                            placeholder="Your name"
+                            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
+                          <input
+                            type="email"
+                            name="email"
+                            value={form.email}
+                            onChange={handleChange}
+                            required
+                            placeholder="you@company.com"
+                            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all"
+                          />
+                        </div>
+                      </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Message</label>
-                    <textarea
-                      rows={5}
-                      placeholder="How can we help?"
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all resize-none"
-                    />
-                  </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Subject</label>
+                        <select
+                          name="subject"
+                          value={form.subject}
+                          onChange={handleChange}
+                          className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all appearance-none cursor-pointer"
+                        >
+                          <option>General inquiry</option>
+                          <option>Technical support</option>
+                          <option>Sales / Enterprise</option>
+                          <option>Partnership</option>
+                          <option>Bug report</option>
+                        </select>
+                      </div>
 
-                  <button type="submit" className="btn-primary text-sm">
-                    Send Message
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7Z" /></svg>
-                  </button>
-                </form>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Message</label>
+                        <textarea
+                          name="message"
+                          value={form.message}
+                          onChange={handleChange}
+                          required
+                          rows={5}
+                          placeholder="How can we help?"
+                          className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all resize-none"
+                        />
+                      </div>
+
+                      {status === 'error' && (
+                        <p className="text-sm text-red-500 bg-red-50 rounded-xl px-4 py-3">{errorMsg}</p>
+                      )}
+
+                      <button type="submit" disabled={status === 'loading'} className="btn-primary text-sm disabled:opacity-60 disabled:cursor-not-allowed">
+                        {status === 'loading' ? (
+                          <>
+                            <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" opacity="0.2" /><path d="M21 12a9 9 0 00-9-9" /></svg>
+                            Sending…
+                          </>
+                        ) : (
+                          <>
+                            Send Message
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7Z" /></svg>
+                          </>
+                        )}
+                      </button>
+                    </form>
+                  </>
+                )}
               </div>
             </ScrollReveal>
           </div>
