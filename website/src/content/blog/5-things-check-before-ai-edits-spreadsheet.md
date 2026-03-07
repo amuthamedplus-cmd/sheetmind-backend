@@ -4,7 +4,7 @@ description: "AI tools for spreadsheets are powerful, but they can also cause pr
 date: "2026-02-10"
 author: "SheetMind Team"
 authorTitle: "Security"
-authorImage: "https://randomuser.me/api/portraits/men/22.jpg"
+authorImage: ""
 category: "Security"
 readTime: "5 min read"
 ---

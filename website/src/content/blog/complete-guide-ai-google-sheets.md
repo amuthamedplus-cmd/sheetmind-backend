@@ -4,7 +4,7 @@ description: "Everything you need to know about AI tools for Google Sheets — f
 date: "2026-02-15"
 author: "SheetMind Team"
 authorTitle: "Content"
-authorImage: "https://randomuser.me/api/portraits/women/52.jpg"
+authorImage: ""
 category: "Guide"
 readTime: "8 min read"
 ---

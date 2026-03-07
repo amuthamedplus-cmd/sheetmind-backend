@@ -262,7 +262,12 @@ export function PricingPage({ onBack, onSelectPlan }: PricingPageProps) {
         <div className="mt-6 text-center">
           <p className="text-sm text-slate-500">
             Have questions?{" "}
-            <a href="#" className="text-emerald-600 hover:underline">
+            <a
+              href="https://sheetmind.xyz/#faq"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-600 hover:underline"
+            >
               View FAQ
             </a>
           </p>

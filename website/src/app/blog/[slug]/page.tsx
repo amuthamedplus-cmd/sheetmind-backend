@@ -32,11 +32,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       type: 'article',
       publishedTime: post.date,
       authors: [post.author],
+      images: post.image
+        ? [{ url: post.image, width: 1200, height: 630, alt: post.title }]
+        : [{ url: '/og-default.png', width: 1200, height: 630, alt: post.title }],
     },
     twitter: {
-      card: 'summary',
+      card: 'summary_large_image',
       title: post.title,
       description: post.description,
+      images: [post.image || '/og-default.png'],
     },
   }
 }
@@ -133,15 +137,21 @@ export default async function BlogPostPage({ params }: Props) {
 
             {/* Author + Date */}
             <div className="flex items-center gap-4 pb-8 mb-10 border-b border-slate-200">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={post.authorImage}
-                alt={post.author}
-                width={48}
-                height={48}
-                className="w-12 h-12 rounded-full object-cover ring-2 ring-emerald-200 ring-offset-2"
-                loading="lazy"
-              />
+              {post.authorImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={post.authorImage}
+                  alt={post.author}
+                  width={48}
+                  height={48}
+                  className="w-12 h-12 rounded-full object-cover ring-2 ring-emerald-200 ring-offset-2"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-sm ring-2 ring-emerald-200 ring-offset-2">
+                  {post.author.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+                </div>
+              )}
               <div>
                 <div className="font-display font-semibold text-sm text-slate-900">{post.author}</div>
                 <div className="text-sm text-slate-400">

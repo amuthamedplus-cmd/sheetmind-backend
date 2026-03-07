@@ -31,10 +31,13 @@ const softwareSchema = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
   name: 'SheetMind',
+  url: 'https://sheetmind.xyz',
   description:
     'AI sidebar for Google Sheets that reads your data, takes action, and lets you undo every step. Validated formulas, PII detection, and step-by-step undo.',
   applicationCategory: 'BusinessApplication',
-  operatingSystem: 'Web',
+  applicationSubCategory: 'Productivity',
+  operatingSystem: 'Web, Google Workspace',
+  image: 'https://sheetmind.xyz/og-default.png',
   offers: [
     {
       '@type': 'Offer',

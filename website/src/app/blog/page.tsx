@@ -13,10 +13,11 @@ export const metadata: Metadata = {
     canonical: '/blog',
   },
   twitter: {
-    card: 'summary',
+    card: 'summary_large_image',
     title: 'Blog — SheetMind | AI for Google Sheets Insights',
     description:
       'Tips, guides, and insights on using AI in Google Sheets. Learn about formula automation, data analysis, and spreadsheet best practices.',
+    images: ['/og-default.png'],
   },
 }
 
@@ -85,15 +86,21 @@ export default function BlogPage() {
                       </p>
 
                       <div className="flex items-center gap-3 pt-4 border-t border-slate-100">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={post.authorImage}
-                          alt={post.author}
-                          width={32}
-                          height={32}
-                          className="w-8 h-8 rounded-full object-cover"
-                          loading="lazy"
-                        />
+                        {post.authorImage ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={post.authorImage}
+                            alt={post.author}
+                            width={32}
+                            height={32}
+                            className="w-8 h-8 rounded-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs flex-shrink-0">
+                            {post.author.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)}
+                          </div>
+                        )}
                         <div>
                           <div className="text-xs font-semibold text-slate-700">{post.author}</div>
                           <div className="text-[11px] text-slate-400">

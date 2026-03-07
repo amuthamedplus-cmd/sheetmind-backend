@@ -1,37 +1,57 @@
 import ScrollReveal from './ScrollReveal'
 
+const avatarColors: Record<string, string> = {
+  emerald: 'bg-emerald-100 text-emerald-700',
+  blue: 'bg-blue-100 text-blue-700',
+  purple: 'bg-purple-100 text-purple-700',
+  amber: 'bg-amber-100 text-amber-700',
+}
+
+function InitialsAvatar({ name, color }: { name: string; color: string }) {
+  const initials = name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2)
+  return (
+    <div
+      className={`w-12 h-12 rounded-full flex items-center justify-center font-display font-bold text-sm ring-2 ring-offset-2 ${avatarColors[color]} ring-${color}-200`}
+      aria-label={name}
+    >
+      {initials}
+    </div>
+  )
+}
+
 const testimonials = [
   {
     quote:
       'I was skeptical about another AI tool for Sheets, but the undo feature changed everything. I can let the AI try things without worrying about messing up my data.',
     name: 'Sarah K.',
     title: 'Data Analyst, SaaS Company',
-    image: 'https://randomuser.me/api/portraits/women/44.jpg',
-    ring: 'ring-emerald-200',
+    color: 'emerald',
   },
   {
     quote:
       "The confidence scores are brilliant. I know immediately when to trust the output and when to double-check. Saves me hours of manual verification every week.",
     name: 'James R.',
     title: 'Financial Analyst',
-    image: 'https://randomuser.me/api/portraits/men/32.jpg',
-    ring: 'ring-blue-200',
+    color: 'blue',
   },
   {
     quote:
       "We handle customer PII daily. SheetMind is the only AI tool that actually warns us before processing sensitive data. That alone is worth the subscription.",
     name: 'Priya M.',
     title: 'Operations Manager',
-    image: 'https://randomuser.me/api/portraits/women/68.jpg',
-    ring: 'ring-purple-200',
+    color: 'purple',
   },
   {
     quote:
       'The =SHEETMIND() formula is a game-changer. I categorized 2,000 product descriptions in minutes instead of days. The batch processing is incredibly fast.',
     name: 'Alex T.',
     title: 'E-commerce Manager',
-    image: 'https://randomuser.me/api/portraits/men/75.jpg',
-    ring: 'ring-amber-200',
+    color: 'amber',
   },
 ]
 
@@ -67,15 +87,7 @@ export default function Testimonials() {
                 </blockquote>
 
                 <div className="flex items-center gap-4 mt-6 pt-6 border-t border-slate-100">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={t.image}
-                    alt={t.name}
-                    width={48}
-                    height={48}
-                    className={`w-12 h-12 rounded-full object-cover ring-2 ${t.ring} ring-offset-2`}
-                    loading="lazy"
-                  />
+                  <InitialsAvatar name={t.name} color={t.color} />
                   <div>
                     <div className="font-display font-semibold text-sm text-slate-900">{t.name}</div>
                     <div className="text-xs text-slate-400">{t.title}</div>

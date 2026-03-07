@@ -3,6 +3,8 @@
   "dependencies": {},
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
+  "homepageUrl": "https://sheetmind.xyz",
+  "supportUrl": "https://sheetmind.xyz/contact",
   "oauthScopes": [
     "https://www.googleapis.com/auth/spreadsheets.currentonly",
     "https://www.googleapis.com/auth/script.container.ui",

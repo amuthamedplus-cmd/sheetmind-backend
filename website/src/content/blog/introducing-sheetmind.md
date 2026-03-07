@@ -4,7 +4,7 @@ description: "Meet SheetMind — the first AI tool for Google Sheets that gives 
 date: "2026-02-17"
 author: "SheetMind Team"
 authorTitle: "Founders"
-authorImage: "https://randomuser.me/api/portraits/men/46.jpg"
+authorImage: ""
 category: "Product"
 readTime: "4 min read"
 ---
