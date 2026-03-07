@@ -2,7 +2,7 @@ import ScrollReveal from './ScrollReveal'
 
 export default function DeepDives() {
   return (
-    <section className="py-24 lg:py-32 space-y-24 lg:space-y-32">
+    <section className="py-24 lg:py-32 space-y-24 lg:space-y-32 overflow-hidden">
       {/* Deep Dive 1: Smart Analysis */}
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">

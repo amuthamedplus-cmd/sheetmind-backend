@@ -81,8 +81,9 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={`${sora.variable} ${dmSans.variable}`}>
+    <html lang="en" className={`${sora.variable} ${dmSans.variable} overflow-x-hidden`}>
       <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://us.i.posthog.com" />
@@ -94,7 +95,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#10b981" />
         <JsonLd data={organizationSchema} />
       </head>
-      <body className="font-body antialiased">
+      <body className="font-body antialiased overflow-x-hidden">
         <Suspense fallback={null}>
           <PostHogProvider>{children}</PostHogProvider>
         </Suspense>

@@ -102,7 +102,7 @@ function ProblemSolution() {
 
 export default function Home() {
   return (
-    <main className="min-h-screen">
+    <main className="min-h-screen overflow-x-hidden">
       <JsonLd data={websiteSchema} />
       <JsonLd data={softwareSchema} />
       <JsonLd data={faqSchema} />

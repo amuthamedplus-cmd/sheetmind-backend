@@ -25,18 +25,18 @@ export default function DashboardMock() {
 
   return (
     <div className="relative w-full max-w-5xl mx-auto mt-12 lg:mt-16">
-      {/* Floating decorative elements */}
-      <div className="absolute -top-8 -left-6 w-14 h-14 rounded-2xl bg-emerald-100 border border-emerald-200/60 flex items-center justify-center animate-float shadow-lg shadow-emerald-100/50 z-10">
+      {/* Floating decorative elements — hidden on mobile to prevent overflow */}
+      <div className="hidden sm:flex absolute -top-8 -left-6 w-14 h-14 rounded-2xl bg-emerald-100 border border-emerald-200/60 items-center justify-center animate-float shadow-lg shadow-emerald-100/50 z-10">
         <GoogleSheetsLogo size={28} />
       </div>
 
-      <div className="absolute -top-4 -right-4 w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200/60 flex items-center justify-center animate-float-delayed shadow-lg shadow-amber-100/50 z-10">
+      <div className="hidden sm:flex absolute -top-4 -right-4 w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200/60 items-center justify-center animate-float-delayed shadow-lg shadow-amber-100/50 z-10">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="text-amber-500">
           <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16.4 5.6 21.2 8 14 2 9.2h7.6L12 2Z" fill="currentColor" />
         </svg>
       </div>
 
-      <div className="absolute -bottom-6 -left-4 w-12 h-12 rounded-2xl bg-blue-50 border border-blue-200/60 flex items-center justify-center animate-float-slow shadow-lg shadow-blue-100/50 z-10">
+      <div className="hidden sm:flex absolute -bottom-6 -left-4 w-12 h-12 rounded-2xl bg-blue-50 border border-blue-200/60 items-center justify-center animate-float-slow shadow-lg shadow-blue-100/50 z-10">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="text-blue-500">
           <rect x="3" y="12" width="4" height="8" rx="1" fill="currentColor" opacity="0.5" />
           <rect x="10" y="8" width="4" height="12" rx="1" fill="currentColor" opacity="0.7" />
@@ -44,7 +44,7 @@ export default function DashboardMock() {
         </svg>
       </div>
 
-      <div className="absolute -bottom-4 -right-6 w-14 h-14 rounded-2xl bg-green-50 border border-green-200/60 flex items-center justify-center animate-float shadow-lg shadow-green-100/50 z-10" style={{ animationDelay: '3s' }}>
+      <div className="hidden sm:flex absolute -bottom-4 -right-6 w-14 h-14 rounded-2xl bg-green-50 border border-green-200/60 items-center justify-center animate-float shadow-lg shadow-green-100/50 z-10" style={{ animationDelay: '3s' }}>
         <GoogleSheetsLogo size={28} />
       </div>
 
@@ -54,12 +54,12 @@ export default function DashboardMock() {
       {/* Main dashboard container */}
       <div className="dashboard-shadow rounded-2xl overflow-hidden bg-white border border-slate-200/80">
         {/* Google Sheets title bar */}
-        <div className="bg-[#f9fbfd] border-b border-slate-200/60 px-4 py-2 flex items-center gap-3">
-          <div className="flex items-center gap-2.5">
+        <div className="bg-[#f9fbfd] border-b border-slate-200/60 px-3 sm:px-4 py-2 flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
             <GoogleSheetsLogo size={22} />
-            <div>
-              <span className="text-sm font-medium text-slate-700">Sales Data Q4</span>
-              <div className="flex items-center gap-1 mt-0.5">
+            <div className="min-w-0">
+              <span className="text-xs sm:text-sm font-medium text-slate-700 truncate block">Sales Data Q4</span>
+              <div className="hidden sm:flex items-center gap-1 mt-0.5">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" className="text-slate-400">
                   <path d="M12 2l1.5 3.5L17 7l-3.5 1.5L12 12l-1.5-3.5L7 7l3.5-1.5L12 2Z" fill="currentColor" />
                 </svg>
@@ -73,7 +73,7 @@ export default function DashboardMock() {
               <span key={item} className="text-[11px] text-slate-600 px-2.5 py-1 rounded-md hover:bg-slate-200/60 cursor-default">{item}</span>
             ))}
           </div>
-          <div className="flex-1" />
+          <div className="hidden sm:block flex-1" />
           <div className="flex items-center gap-2">
             {/* Share button */}
             <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#c2e7ff] text-[11px] font-medium text-[#001d35]">
@@ -122,23 +122,23 @@ export default function DashboardMock() {
         </div>
 
         {/* Formula bar */}
-        <div className="bg-white border-b border-slate-200/60 px-3 py-1.5 flex items-center gap-2">
-          <span className="text-[11px] font-mono text-[#5f6368] bg-white px-2 py-0.5 rounded border border-slate-200 min-w-[36px] text-center">B4</span>
-          <div className="w-px h-4 bg-slate-200" />
-          <span className="text-[11px] text-[#5f6368] font-medium px-1">fx</span>
-          <div className="w-px h-4 bg-slate-200" />
-          <span className="text-[11px] text-[#5f6368]">$67,800</span>
+        <div className="bg-white border-b border-slate-200/60 px-2 sm:px-3 py-1.5 flex items-center gap-1.5 sm:gap-2">
+          <span className="text-[11px] font-mono text-[#5f6368] bg-white px-1.5 sm:px-2 py-0.5 rounded border border-slate-200 min-w-[32px] sm:min-w-[36px] text-center flex-shrink-0">B4</span>
+          <div className="w-px h-4 bg-slate-200 flex-shrink-0" />
+          <span className="text-[11px] text-[#5f6368] font-medium px-1 flex-shrink-0">fx</span>
+          <div className="w-px h-4 bg-slate-200 flex-shrink-0" />
+          <span className="text-[11px] text-[#5f6368] truncate">$67,800</span>
         </div>
 
         {/* Main content area */}
-        <div className="flex min-h-[380px] lg:min-h-[420px]">
+        <div className="flex min-h-[300px] sm:min-h-[380px] lg:min-h-[420px]">
           {/* Spreadsheet grid */}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden min-w-0">
             {/* Column headers */}
             <div className="flex border-b border-slate-200/60 bg-[#f8f9fa]">
-              <div className="w-10 min-w-[40px] border-r border-slate-200/40" />
+              <div className="w-8 sm:w-10 min-w-[32px] sm:min-w-[40px] border-r border-slate-200/40 flex-shrink-0" />
               {['A', 'B', 'C', 'D'].map((col) => (
-                <div key={col} className="flex-1 min-w-[80px] px-3 py-1 text-center text-[11px] font-medium text-[#5f6368] border-r border-slate-200/40">
+                <div key={col} className="flex-1 min-w-[60px] sm:min-w-[80px] px-1 sm:px-3 py-1 text-center text-[11px] font-medium text-[#5f6368] border-r border-slate-200/40">
                   {col}
                 </div>
               ))}
@@ -163,13 +163,13 @@ export default function DashboardMock() {
                   row.highlighted ? 'bg-emerald-50/40' : row.header ? 'bg-[#f8f9fa]' : 'bg-white'
                 }`}
               >
-                <div className="w-10 min-w-[40px] px-1 py-1.5 text-center text-[11px] text-[#80868b] border-r border-slate-200/40 flex-shrink-0 bg-[#f8f9fa]">
+                <div className="w-8 sm:w-10 min-w-[32px] sm:min-w-[40px] px-1 py-1.5 text-center text-[11px] text-[#80868b] border-r border-slate-200/40 flex-shrink-0 bg-[#f8f9fa]">
                   {row.n}
                 </div>
                 {row.cells.map((cell, i) => (
                   <div
                     key={i}
-                    className={`flex-1 min-w-[80px] px-3 py-1.5 text-[11px] border-r border-slate-100/40 truncate ${
+                    className={`flex-1 min-w-[60px] sm:min-w-[80px] px-1 sm:px-3 py-1.5 text-[10px] sm:text-[11px] border-r border-slate-100/40 truncate ${
                       row.header ? 'font-bold text-[#202124]' : 'text-[#3c4043]'
                     } ${row.highlighted && i === 1 ? 'text-emerald-700 font-semibold' : ''}
                     ${row.highlighted ? 'ring-1 ring-inset ring-emerald-200/50' : ''}`}
@@ -181,8 +181,8 @@ export default function DashboardMock() {
             ))}
           </div>
 
-          {/* ============ SheetMind Sidebar Panel ============ */}
-          <div className="w-[240px] lg:w-[280px] border-l border-slate-200 bg-white flex flex-col flex-shrink-0">
+          {/* ============ SheetMind Sidebar Panel — hidden on mobile ============ */}
+          <div className="hidden sm:flex flex-col w-[240px] lg:w-[280px] border-l border-slate-200 bg-white flex-shrink-0">
 
             {/* Sidebar Header — matches actual Header.tsx */}
             <div className="flex-shrink-0 border-b border-slate-100">
@@ -330,17 +330,17 @@ export default function DashboardMock() {
         </div>
 
         {/* Sheet tabs — Google Sheets style */}
-        <div className="bg-[#f8f9fa] border-t border-slate-200/60 px-3 py-1 flex items-center gap-1">
-          <button className="w-5 h-5 rounded flex items-center justify-center text-[#5f6368] hover:bg-slate-200/60 transition-colors text-xs cursor-default">+</button>
-          <div className="flex items-center gap-0.5 ml-1">
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-t-md bg-white border border-b-0 border-slate-200 text-[11px] font-medium text-[#188038] shadow-sm">
+        <div className="bg-[#f8f9fa] border-t border-slate-200/60 px-2 sm:px-3 py-1 flex items-center gap-1 overflow-hidden">
+          <button className="w-5 h-5 rounded flex items-center justify-center text-[#5f6368] hover:bg-slate-200/60 transition-colors text-xs cursor-default flex-shrink-0">+</button>
+          <div className="flex items-center gap-0.5 ml-1 overflow-hidden">
+            <div className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-t-md bg-white border border-b-0 border-slate-200 text-[11px] font-medium text-[#188038] shadow-sm flex-shrink-0">
               <GoogleSheetsLogo size={12} />
               Sheet1
             </div>
-            <div className="px-3 py-1 text-[11px] text-[#5f6368] rounded-t-md hover:bg-slate-200/40 cursor-default">
+            <div className="hidden xs:block px-2 sm:px-3 py-1 text-[11px] text-[#5f6368] rounded-t-md hover:bg-slate-200/40 cursor-default whitespace-nowrap">
               Sheet2
             </div>
-            <div className="px-3 py-1 text-[11px] text-[#5f6368] rounded-t-md hover:bg-slate-200/40 cursor-default">
+            <div className="hidden sm:block px-3 py-1 text-[11px] text-[#5f6368] rounded-t-md hover:bg-slate-200/40 cursor-default whitespace-nowrap">
               Regional Summary
             </div>
           </div>
