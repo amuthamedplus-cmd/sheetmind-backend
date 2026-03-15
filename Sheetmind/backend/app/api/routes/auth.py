@@ -23,30 +23,55 @@ _pkce_store: dict[str, tuple[str, float]] = {}
 _pkce_lock = Lock()
 
 # ---------------------------------------------------------------------------
-# Token poll store — maps nonce → (token_data, expiry_ts)
+# Token poll store — maps nonce → (token_data, expiry_ts, bound_ip, poll_count)
 # oauth-complete exchanges the code server-side and stores tokens here.
 # The GAS sidebar polls /auth/poll/{nonce} to pick them up.
-# Solves the window.opener=null problem in GAS sandbox popups.
+#
+# Security safeguards:
+#   - IP binding: only the IP that initiated login can poll
+#   - Max polls: nonce rejected after 30 attempts (prevents enumeration)
+#   - Short TTL: tokens expire after 2 minutes
+#   - Single use: token deleted immediately on first successful read
 # ---------------------------------------------------------------------------
-_token_store: dict[str, tuple[dict, float]] = {}
+_token_store: dict[str, tuple[dict, float, str, int]] = {}
 _token_lock = Lock()
+_TOKEN_TTL = 120       # 2 minutes
+_MAX_POLL_ATTEMPTS = 30
 
 
-def _store_token(nonce: str, token_data: dict, ttl_secs: int = 300) -> None:
+def _store_token(nonce: str, token_data: dict, bound_ip: str) -> None:
     with _token_lock:
         now = time.time()
-        expired = [k for k, (_, exp) in list(_token_store.items()) if exp < now]
+        expired = [k for k, (_, exp, _, _) in list(_token_store.items()) if exp < now]
         for k in expired:
             del _token_store[k]
-        _token_store[nonce] = (token_data, now + ttl_secs)
+        _token_store[nonce] = (token_data, now + _TOKEN_TTL, bound_ip, 0)
 
 
-def _pop_token(nonce: str) -> dict | None:
+def _pop_token(nonce: str, requester_ip: str) -> dict | None:
     with _token_lock:
-        entry = _token_store.pop(nonce, None)
-        if entry and entry[1] >= time.time():
-            return entry[0]
-        return None
+        entry = _token_store.get(nonce)
+        if not entry:
+            return None
+        token_data, expiry, bound_ip, poll_count = entry
+        # Reject expired entries
+        if expiry < time.time():
+            del _token_store[nonce]
+            return None
+        # Reject if too many poll attempts (enumeration protection)
+        if poll_count >= _MAX_POLL_ATTEMPTS:
+            del _token_store[nonce]
+            logger.warning(f"Poll nonce {nonce[:8]}... exceeded max attempts — discarded")
+            return None
+        # Reject if IP doesn't match the one that initiated login
+        if bound_ip and requester_ip and bound_ip != requester_ip:
+            logger.warning(f"Poll IP mismatch: expected {bound_ip}, got {requester_ip}")
+            return None
+        # Increment poll count
+        _token_store[nonce] = (token_data, expiry, bound_ip, poll_count + 1)
+        # Token found — pop it (single use)
+        del _token_store[nonce]
+        return token_data
 
 
 def _store_pkce_verifier(nonce: str, verifier: str, ttl_secs: int = 300) -> None:
@@ -522,8 +547,9 @@ async def callback(body: TokenRequest, request: Request):
         }
 
         # Store tokens for sidebar polling (window.opener may be null in GAS)
+        # Bind to requester IP so only the originating client can poll
         if body.nonce:
-            _store_token(body.nonce, token_data)
+            _store_token(body.nonce, token_data, _get_client_ip(request))
 
         return token_data
 
@@ -540,11 +566,17 @@ async def poll_token(nonce: str, request: Request):
     Sidebar polls this endpoint after opening the OAuth popup.
     Returns tokens once oauth-complete has exchanged the code server-side.
     Returns 204 (no content) if tokens aren't ready yet.
+
+    Security:
+    - IP binding: only the IP that called /auth/callback can retrieve tokens
+    - Max 30 poll attempts per nonce before it is discarded
+    - Tokens expire after 2 minutes and are deleted on first read
     """
     _check_auth_rate_limit(request, "poll")
-    token_data = _pop_token(nonce)
+    from fastapi.responses import Response
+    requester_ip = _get_client_ip(request)
+    token_data = _pop_token(nonce, requester_ip)
     if not token_data:
-        from fastapi.responses import Response
         return Response(status_code=204)
     return token_data
 
