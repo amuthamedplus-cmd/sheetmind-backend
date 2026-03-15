@@ -1,9 +1,9 @@
 import base64
 import hashlib
+import json
 import logging
 import secrets
 import time
-from threading import Lock
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, field_validator
@@ -16,79 +16,79 @@ from app.services.rate_limiter import check_rate_limit_by_ip
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# PKCE verifier store — maps nonce → (code_verifier, expiry_ts)
-# ---------------------------------------------------------------------------
-_pkce_store: dict[str, tuple[str, float]] = {}
-_pkce_lock = Lock()
-
-# ---------------------------------------------------------------------------
-# Token poll store — maps nonce → (token_data, expiry_ts, bound_ip, poll_count)
-# oauth-complete exchanges the code server-side and stores tokens here.
-# The GAS sidebar polls /auth/poll/{nonce} to pick them up.
-#
-# Security safeguards:
-#   - IP binding: only the IP that initiated login can poll
-#   - Max polls: nonce rejected after 30 attempts (prevents enumeration)
-#   - Short TTL: tokens expire after 2 minutes
-#   - Single use: token deleted immediately on first successful read
-# ---------------------------------------------------------------------------
-_token_store: dict[str, tuple[dict, float, str, int]] = {}
-_token_lock = Lock()
-_TOKEN_TTL = 120       # 2 minutes
-_MAX_POLL_ATTEMPTS = 30
+_TOKEN_TTL = 120    # 2 minutes
+_PKCE_TTL = 300     # 5 minutes
 
 
-def _store_token(nonce: str, token_data: dict, bound_ip: str) -> None:
-    with _token_lock:
-        now = time.time()
-        expired = [k for k, (_, exp, _, _) in list(_token_store.items()) if exp < now]
-        for k in expired:
-            del _token_store[k]
-        _token_store[nonce] = (token_data, now + _TOKEN_TTL, bound_ip, 0)
+def _get_redis():
+    """Get a Redis client, or None if Redis is unavailable."""
+    try:
+        import redis as _redis
+        client = _redis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+        client.ping()
+        return client
+    except Exception as e:
+        logger.warning(f"Redis unavailable for auth store: {e}")
+        return None
 
 
-def _pop_token(nonce: str, requester_ip: str) -> dict | None:
-    with _token_lock:
-        entry = _token_store.get(nonce)
-        if not entry:
-            return None
-        token_data, expiry, bound_ip, poll_count = entry
-        # Reject expired entries
-        if expiry < time.time():
-            del _token_store[nonce]
-            return None
-        # Reject if too many poll attempts (enumeration protection)
-        if poll_count >= _MAX_POLL_ATTEMPTS:
-            del _token_store[nonce]
-            logger.warning(f"Poll nonce {nonce[:8]}... exceeded max attempts — discarded")
-            return None
-        # Reject if IP doesn't match the one that initiated login
-        if bound_ip and requester_ip and bound_ip != requester_ip:
-            logger.warning(f"Poll IP mismatch: expected {bound_ip}, got {requester_ip}")
-            return None
-        # Increment poll count
-        _token_store[nonce] = (token_data, expiry, bound_ip, poll_count + 1)
-        # Token found — pop it (single use)
-        del _token_store[nonce]
-        return token_data
+def _store_token(nonce: str, token_data: dict) -> None:
+    """Store OAuth token data in Redis keyed by nonce (2-min TTL, single-use)."""
+    r = _get_redis()
+    if r is None:
+        logger.error("Cannot store OAuth token — Redis unavailable")
+        return
+    try:
+        key = f"oauth_token:{nonce}"
+        r.setex(key, _TOKEN_TTL, json.dumps(token_data, default=str))
+    except Exception as e:
+        logger.error(f"Failed to store OAuth token in Redis: {e}")
 
 
-def _store_pkce_verifier(nonce: str, verifier: str, ttl_secs: int = 300) -> None:
-    with _pkce_lock:
-        now = time.time()
-        expired = [k for k, (_, exp) in list(_pkce_store.items()) if exp < now]
-        for k in expired:
-            del _pkce_store[k]
-        _pkce_store[nonce] = (verifier, now + ttl_secs)
+def _pop_token(nonce: str) -> dict | None:
+    """Atomically retrieve and delete the OAuth token for nonce. Returns None if missing/expired."""
+    r = _get_redis()
+    if r is None:
+        return None
+    try:
+        key = f"oauth_token:{nonce}"
+        raw = r.getdel(key)
+        if raw:
+            return json.loads(raw)
+        return None
+    except Exception as e:
+        logger.error(f"Failed to pop OAuth token from Redis: {e}")
+        return None
+
+
+def _store_pkce_verifier(nonce: str, verifier: str) -> None:
+    """Store PKCE code_verifier in Redis keyed by nonce (5-min TTL, single-use)."""
+    r = _get_redis()
+    if r is None:
+        logger.error("Cannot store PKCE verifier — Redis unavailable")
+        return
+    try:
+        key = f"pkce:{nonce}"
+        r.setex(key, _PKCE_TTL, verifier)
+    except Exception as e:
+        logger.error(f"Failed to store PKCE verifier in Redis: {e}")
 
 
 def _pop_pkce_verifier(nonce: str) -> str | None:
-    """Remove and return the verifier for the given nonce, or None if missing/expired."""
-    with _pkce_lock:
-        entry = _pkce_store.pop(nonce, None)
-        if entry and entry[1] >= time.time():
-            return entry[0]
+    """Atomically retrieve and delete the PKCE verifier for nonce. Returns None if missing/expired."""
+    r = _get_redis()
+    if r is None:
+        return None
+    try:
+        key = f"pkce:{nonce}"
+        return r.getdel(key)
+    except Exception as e:
+        logger.error(f"Failed to pop PKCE verifier from Redis: {e}")
         return None
 
 
@@ -194,7 +194,6 @@ async def login(request: Request, nonce: str = ""):
     verifier, challenge = _generate_pkce_pair()
     _store_pkce_verifier(used_nonce, verifier)
     redirect_url_with_nonce = f"{redirect_url}?nonce={used_nonce}"
-
     params: dict = {
         "provider": "google",
         "redirect_to": redirect_url_with_nonce,
@@ -546,10 +545,9 @@ async def callback(body: TokenRequest, request: Request):
             "expires_at": session_obj.expires_at,
         }
 
-        # Store tokens for sidebar polling (window.opener may be null in GAS)
-        # Bind to requester IP so only the originating client can poll
+        # Store tokens in Redis for sidebar polling (window.opener may be null in GAS)
         if body.nonce:
-            _store_token(body.nonce, token_data, _get_client_ip(request))
+            _store_token(body.nonce, token_data)
 
         return token_data
 
@@ -568,14 +566,13 @@ async def poll_token(nonce: str, request: Request):
     Returns 204 (no content) if tokens aren't ready yet.
 
     Security:
-    - IP binding: only the IP that called /auth/callback can retrieve tokens
-    - Max 30 poll attempts per nonce before it is discarded
-    - Tokens expire after 2 minutes and are deleted on first read
+    - Nonce is a UUID — unguessable, single-use, 2-min TTL in Redis
+    - Tokens deleted from Redis immediately on first successful read
+    - Rate-limited per IP
     """
     _check_auth_rate_limit(request, "poll")
     from fastapi.responses import Response
-    requester_ip = _get_client_ip(request)
-    token_data = _pop_token(nonce, requester_ip)
+    token_data = _pop_token(nonce)
     if not token_data:
         return Response(status_code=204)
     return token_data
