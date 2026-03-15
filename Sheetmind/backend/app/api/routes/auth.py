@@ -305,8 +305,8 @@ async def oauth_complete():
     showError(desc);
 
   } else if (code) {
-    // Exchange code server-side so tokens are stored for polling.
-    // This works even when window.opener is null (GAS sandbox popup).
+    // Exchange code server-side so tokens are stored in Redis for polling.
+    // This is critical for GAS sidebar where window.opener is null.
     fetch("/api/auth/callback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -316,15 +316,22 @@ async def oauth_complete():
     .then(function(data) {
       if (data.access_token) {
         showSuccess("You can close this window — login complete.");
-        // Also try postMessage for browsers where opener works
-        sendToOpener({ type: "sheetmind-oauth", code: code, nonce: nonce });
+        // Send TOKENS (not code) via postMessage so the opener doesn't
+        // try to re-exchange an already-consumed authorization code.
+        sendToOpener({
+          type: "sheetmind-oauth",
+          access_token: data.access_token,
+          refresh_token: data.refresh_token || "",
+          nonce: nonce
+        });
         setTimeout(function() { window.close(); }, 2000);
       } else {
         showError("Login failed. Please try again.");
       }
     })
     .catch(function() {
-      // Fallback: try postMessage directly
+      // Server-side exchange failed — try sending code via postMessage
+      // so the opener can exchange it directly (non-GAS browsers only).
       var sent = sendToOpener({ type: "sheetmind-oauth", code: code, nonce: nonce });
       if (sent) {
         showSuccess("This window will close automatically.");
@@ -360,7 +367,8 @@ async def oauth_complete():
           "Content-Security-Policy": (
               "default-src 'none'; "
               "script-src 'unsafe-inline'; "
-              "style-src 'unsafe-inline'"
+              "style-src 'unsafe-inline'; "
+              "connect-src 'self'"
           ),
       },
     )
