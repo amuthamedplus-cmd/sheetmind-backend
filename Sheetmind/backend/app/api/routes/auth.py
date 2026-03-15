@@ -136,17 +136,22 @@ async def login(request: Request, nonce: str = ""):
     # Fall back to a server-generated one if not provided.
     used_nonce = nonce or secrets.token_hex(16)
 
-    # IMPORTANT: Do NOT pass a custom `state` to Supabase.
-    # Supabase generates its own state for CSRF and stores it server-side.
-    # Overriding `state` with our nonce breaks Supabase's check → bad_oauth_state.
-    # Instead, encode our nonce in the redirect_to URL so oauth-complete can
-    # extract it without interfering with Supabase's state mechanism.
+    # PKCE is required by newer Supabase to create a flow_state entry.
+    # Without code_challenge, Supabase won't store state → bad_oauth_state on callback.
+    # We store the verifier server-side so /callback can exchange the code.
+    #
+    # Do NOT pass a custom `state` — Supabase generates its own CSRF state.
+    # Overriding it causes bad_oauth_state. Nonce is embedded in redirect_to instead.
+    verifier, challenge = _generate_pkce_pair()
+    _store_pkce_verifier(used_nonce, verifier)
     redirect_url_with_nonce = f"{redirect_url}?nonce={used_nonce}"
 
     params: dict = {
         "provider": "google",
         "redirect_to": redirect_url_with_nonce,
         "prompt": "select_account",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
     }
 
     url = f"{settings.SUPABASE_URL}/auth/v1/authorize?" + urlencode(params)
