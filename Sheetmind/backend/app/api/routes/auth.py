@@ -395,6 +395,10 @@ async def signin(body: SignInRequest, request: Request):
         error_msg = str(e).lower()
         if "invalid" in error_msg or "credentials" in error_msg:
             raise HTTPException(status_code=401, detail="Invalid email or password")
+        if "email not confirmed" in error_msg or "not confirmed" in error_msg:
+            raise HTTPException(status_code=401, detail="Please verify your email before signing in. Check your inbox for the confirmation link.")
+        if "user not found" in error_msg or "no user" in error_msg:
+            raise HTTPException(status_code=401, detail="No account found with this email. Please sign up first.")
         raise HTTPException(status_code=401, detail="Sign in failed. Please try again.")
 
 

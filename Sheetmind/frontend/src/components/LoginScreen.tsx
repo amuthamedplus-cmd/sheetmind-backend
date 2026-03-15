@@ -41,6 +41,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [popupOpened, setPopupOpened] = useState(false);
 
   // Form fields
   const [email, setEmail] = useState("");
@@ -134,6 +135,10 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         // Popup blocked — fall back to new tab
         window.open(url, "_blank");
         setError("Complete login in the popup, then come back here.");
+      } else {
+        // Popup opened — show manual "I've logged in" button in case
+        // window.opener is null in the GAS sandbox (postMessage won't arrive)
+        setPopupOpened(true);
       }
       setIsLoading(false);
     } catch (err) {
@@ -249,6 +254,24 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         </div>
 
         {/* Error/Success messages */}
+        {popupOpened && !error && (
+          <div className="mb-3 p-3 bg-emerald-50 border border-emerald-100 rounded-xl animate-scale-in">
+            <div className="flex items-start gap-2">
+              <svg className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+              </svg>
+              <div>
+                <p className="text-sm text-emerald-700">Complete Google login in the popup window.</p>
+                <button
+                  onClick={handleCheckLogin}
+                  className="mt-1.5 text-sm font-semibold text-emerald-600 hover:text-emerald-800 underline underline-offset-2"
+                >
+                  I've completed login →
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {error && (
           <div className="mb-3 p-3 bg-red-50 border border-red-100 rounded-xl animate-scale-in">
             <div className="flex items-start gap-2">
@@ -257,7 +280,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               </svg>
               <div>
                 <p className="text-sm text-red-700">{error}</p>
-                {error.includes("popup") && (
+                {(error.includes("popup") || popupOpened) && (
                   <button
                     onClick={handleCheckLogin}
                     className="mt-1.5 text-sm font-semibold text-red-600 hover:text-red-800 underline underline-offset-2"
