@@ -94,6 +94,8 @@ export default function RootLayout({
         <link rel="manifest" href="/site.webmanifest" />
         <meta name="theme-color" content="#10b981" />
         <JsonLd data={organizationSchema} />
+        {/* Overtracking Pixel Code */}
+        <script defer src="https://cdn.overtracking.com/t/t23fkUS36NA56tao1/"></script>
       </head>
       <body className="font-body antialiased overflow-x-hidden">
         <Suspense fallback={null}>
