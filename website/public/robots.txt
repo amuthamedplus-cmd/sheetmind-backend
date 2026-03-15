@@ -1,6 +1,0 @@
-User-agent: *
-Allow: /
-Disallow: /login
-Disallow: /signup
-
-Sitemap: https://sheetmind.xyz/sitemap.xml

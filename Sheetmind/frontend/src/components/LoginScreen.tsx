@@ -52,7 +52,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     trackLoginPageViewed();
   }, []);
 
-  // Listen for OAuth tokens from the popup window via postMessage.
+  // Listen for OAuth result from the popup window via postMessage.
   // Validates both the sender origin and a one-time nonce to prevent
   // spoofed or intercepted postMessages from injecting tokens.
   useEffect(() => {
@@ -65,25 +65,41 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       if (event.origin !== backendOrigin && event.origin !== window.location.origin) {
         return;
       }
-      if (event.data?.type === "sheetmind-oauth" && event.data.access_token) {
-        // Verify the nonce matches what we generated for this login attempt.
-        // This ensures the message came from our own OAuth flow, not a spoofed one.
-        const storedNonce = sessionStorage.getItem("oauth_nonce");
-        if (storedNonce && event.data.nonce !== storedNonce) {
-          console.warn("SheetMind: OAuth nonce mismatch — rejecting postMessage");
-          return;
-        }
-        sessionStorage.removeItem("oauth_nonce");
+      if (event.data?.type !== "sheetmind-oauth") return;
 
+      // Verify the nonce matches what we generated for this login attempt.
+      // This ensures the message came from our own OAuth flow, not a spoofed one.
+      const storedNonce = sessionStorage.getItem("oauth_nonce");
+      if (storedNonce && event.data.nonce !== storedNonce) {
+        console.warn("SheetMind: OAuth nonce mismatch — rejecting postMessage");
+        return;
+      }
+      sessionStorage.removeItem("oauth_nonce");
+
+      if (event.data.code) {
+        // PKCE flow — exchange authorization code for tokens via backend
+        authApi.callback(undefined, undefined, event.data.code, event.data.nonce)
+          .then((result) => {
+            authApi.setTokens(result.access_token, result.refresh_token || "");
+            trackLoginSuccess("google");
+            onLoginSuccess(result.user);
+          })
+          .catch((err: any) => {
+            const msg = err?.message || "Login failed. Please try again.";
+            setError(msg);
+            trackLoginError("google", msg);
+            setIsLoading(false);
+          });
+      } else if (event.data.access_token) {
+        // Implicit flow fallback — tokens already in the message
         authApi.setTokens(event.data.access_token, event.data.refresh_token || "");
-        // Exchange tokens via callback to get user info (avatar, name, etc.)
         authApi.callback(event.data.access_token, event.data.refresh_token || "")
           .then((result) => {
             trackLoginSuccess("google");
             onLoginSuccess(result.user);
           })
           .catch(() => {
-            // Callback failed but tokens are stored — proceed without user data
+            // Callback failed but tokens are stored — proceed without full user data
             trackLoginSuccess("google");
             onLoginSuccess();
           });

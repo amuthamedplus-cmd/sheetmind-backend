@@ -1,4 +1,9 @@
+import base64
+import hashlib
 import logging
+import secrets
+import time
+from threading import Lock
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, field_validator
@@ -10,6 +15,41 @@ from app.core.auth import get_current_user
 from app.services.rate_limiter import check_rate_limit_by_ip
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# PKCE verifier store — maps nonce → (code_verifier, expiry_ts)
+# Keyed by the nonce the frontend generates for each login attempt.
+# Entries are cleaned up on each write and when popped.
+# ---------------------------------------------------------------------------
+_pkce_store: dict[str, tuple[str, float]] = {}
+_pkce_lock = Lock()
+
+
+def _store_pkce_verifier(nonce: str, verifier: str, ttl_secs: int = 300) -> None:
+    with _pkce_lock:
+        now = time.time()
+        expired = [k for k, (_, exp) in list(_pkce_store.items()) if exp < now]
+        for k in expired:
+            del _pkce_store[k]
+        _pkce_store[nonce] = (verifier, now + ttl_secs)
+
+
+def _pop_pkce_verifier(nonce: str) -> str | None:
+    """Remove and return the verifier for the given nonce, or None if missing/expired."""
+    with _pkce_lock:
+        entry = _pkce_store.pop(nonce, None)
+        if entry and entry[1] >= time.time():
+            return entry[0]
+        return None
+
+
+def _generate_pkce_pair() -> tuple[str, str]:
+    """Return (code_verifier, code_challenge) for PKCE S256."""
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+    return verifier, challenge
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -39,8 +79,12 @@ def _check_auth_rate_limit(request: Request, action: str):
 
 
 class TokenRequest(BaseModel):
-    access_token: str
-    refresh_token: str
+    # Implicit flow
+    access_token: str = ""
+    refresh_token: str = ""
+    # PKCE flow
+    code: str = ""
+    nonce: str = ""
 
 
 class RefreshRequest(BaseModel):
@@ -70,67 +114,83 @@ class SignInRequest(BaseModel):
 @router.get("/login")
 async def login(request: Request, nonce: str = ""):
     """
-    Return the Supabase OAuth URL for Google login.
-    Uses implicit flow (no PKCE) so tokens come back in the URL hash fragment.
-    Redirects to our own /oauth-complete page which relays tokens
-    back to the opener window via postMessage.
+    Return the Supabase OAuth URL for Google login using PKCE flow.
 
-    An optional `nonce` query parameter is passed through the OAuth `state`
-    so the receiver can verify the postMessage came from its own flow.
+    PKCE (Proof Key for Code Exchange) is the modern, secure OAuth flow:
+    1. We generate a code_verifier (random secret) + code_challenge (SHA-256 hash).
+    2. The code_challenge is sent to Supabase in the auth URL.
+    3. After login, Supabase redirects to /oauth-complete with ?code=AUTH_CODE.
+    4. The page sends code + nonce back to the opener via postMessage.
+    5. The frontend calls /auth/callback with code + nonce.
+    6. We look up the stored verifier by nonce and exchange the code for tokens.
+
+    The nonce ties the postMessage back to the original request (CSRF protection).
+    The code_verifier is stored server-side keyed by nonce (5-min TTL).
     """
     from urllib.parse import urlencode
 
-    # Build callback URL pointing to our backend's oauth-complete page
     base = str(request.base_url).rstrip("/")
     redirect_url = f"{base}{settings.API_PREFIX}/auth/oauth-complete"
+
+    # Use the frontend-supplied nonce (generated per-login-attempt).
+    # Fall back to a server-generated one if not provided.
+    used_nonce = nonce or secrets.token_hex(16)
+
+    # Generate PKCE pair and store verifier so /auth/callback can exchange the code.
+    verifier, challenge = _generate_pkce_pair()
+    _store_pkce_verifier(used_nonce, verifier)
 
     params: dict = {
         "provider": "google",
         "redirect_to": redirect_url,
         "prompt": "select_account",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        # state echoed back by Supabase — used to verify the postMessage
+        # and look up the stored code_verifier.
+        "state": used_nonce,
     }
-    # Embed the nonce in state so oauth-complete can echo it back via postMessage.
-    # Supabase preserves the `state` param through the OAuth redirect.
-    if nonce:
-        params["state"] = nonce
 
-    # Construct OAuth URL manually — avoids SDK's PKCE flow which returns
-    # a ?code= param that requires a code_verifier to exchange.
-    # Without code_challenge, Supabase uses implicit flow → #access_token in hash.
     url = f"{settings.SUPABASE_URL}/auth/v1/authorize?" + urlencode(params)
-
     return {"url": url}
 
 
 @router.get("/oauth-complete", response_class=HTMLResponse)
 async def oauth_complete():
     """
-    Callback page served after Google OAuth completes.
-    Extracts tokens from the URL hash fragment and sends them
-    back to the opener window (GAS sidebar) via postMessage,
-    then closes itself.
+    Callback page after Google OAuth completes (both PKCE and implicit flows).
+
+    PKCE flow (modern, default):
+      Supabase redirects here with ?code=AUTH_CODE&state=NONCE in the query string.
+      This page sends {type, code, nonce} back to the opener via postMessage.
+      The frontend then calls /auth/callback with the code + nonce.
+      The backend looks up the stored code_verifier and exchanges the code for tokens.
+
+    Implicit flow (legacy fallback):
+      Supabase redirects here with #access_token=TOKEN&state=NONCE in the hash.
+      This page sends {type, access_token, refresh_token, nonce} to the opener.
     """
     return HTMLResponse(
-      content=f"""<!DOCTYPE html>
+      content="""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SheetMind — Login</title>
+<title>SheetMind \u2014 Login</title>
 <style>
-  *{{margin:0;padding:0;box-sizing:border-box}}
-  body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
        display:flex;align-items:center;justify-content:center;min-height:100vh;
-       background:linear-gradient(135deg,#ecfdf5,#f0fdfa,#ecfeff)}}
-  .card{{text-align:center;padding:2.5rem;background:#fff;border-radius:1rem;
-        box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:360px;width:90%}}
-  .spinner{{width:40px;height:40px;border:3px solid #d1fae5;border-top-color:#10b981;
-           border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 1rem}}
-  @keyframes spin{{to{{transform:rotate(360deg)}}}}
-  h2{{font-size:1.125rem;color:#111827;margin-bottom:.5rem}}
-  p{{font-size:.875rem;color:#6b7280}}
-  .success{{color:#059669}}
-  .error{{color:#dc2626}}
+       background:linear-gradient(135deg,#ecfdf5,#f0fdfa,#ecfeff)}
+  .card{text-align:center;padding:2.5rem;background:#fff;border-radius:1rem;
+        box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:360px;width:90%}
+  .spinner{width:40px;height:40px;border:3px solid #d1fae5;border-top-color:#10b981;
+           border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 1rem}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  h2{font-size:1.125rem;color:#111827;margin-bottom:.5rem}
+  p{font-size:.875rem;color:#6b7280}
+  .success{color:#059669}
+  .error{color:#dc2626}
 </style>
 </head>
 <body>
@@ -140,59 +200,92 @@ async def oauth_complete():
   <p id="msg">Please wait</p>
 </div>
 <script>
-(function(){{
-  var hash = window.location.hash.substring(1);
-  var params = new URLSearchParams(hash);
-  var accessToken = params.get("access_token");
-  var refreshToken = params.get("refresh_token");
-  // Supabase echoes the `state` param back in the hash fragment.
-  // We embedded the caller's nonce there so we can return it for verification.
-  var nonce = params.get("state") || "";
-  var el = function(id){{ return document.getElementById(id); }};
+(function() {
+  var hashParams = new URLSearchParams(window.location.hash.substring(1));
+  var queryParams = new URLSearchParams(window.location.search);
+  var el = function(id) { return document.getElementById(id); };
 
-  if (accessToken && window.opener) {{
-    // Send tokens back to the opener via postMessage.
-    // targetOrigin is "*" because the GAS sidebar runs on a dynamic
-    // sandbox origin (n-<hash>-script.googleusercontent.com) that cannot
-    // be predicted at serve time. The nonce mitigates this: the receiver
-    // verifies that the nonce in the message matches the one it generated
-    // and stored in sessionStorage before accepting the tokens.
-    try {{
-      window.opener.postMessage({{
-        type: "sheetmind-oauth",
-        access_token: accessToken,
-        refresh_token: refreshToken || "",
-        nonce: nonce,
-        origin: window.location.origin
-      }}, "*");
-    }} catch(e) {{
-      console.warn("SheetMind: Could not deliver tokens to opener:", e);
-    }}
+  // Check for OAuth error first (works for both flows)
+  var error = hashParams.get("error") || queryParams.get("error");
+  var errorDesc = hashParams.get("error_description") || queryParams.get("error_description");
 
+  // PKCE flow: code comes in query string
+  var code = queryParams.get("code");
+
+  // Implicit flow: access_token comes in hash fragment
+  var accessToken = hashParams.get("access_token");
+  var refreshToken = hashParams.get("refresh_token") || "";
+
+  // State (nonce) may come in hash (implicit) or query string (PKCE)
+  var nonce = hashParams.get("state") || queryParams.get("state") || "";
+
+  function showSuccess(msg) {
     el("spinner").style.display = "none";
     el("title").textContent = "Login successful!";
     el("title").className = "success";
-    el("msg").textContent = "This window will close automatically.";
-    setTimeout(function(){{ window.close(); }}, 1500);
-  }} else if (accessToken && !window.opener) {{
-    // Opened as a regular tab (popup was blocked)
-    el("spinner").style.display = "none";
-    el("title").textContent = "Login successful!";
-    el("title").className = "success";
-    el("msg").textContent = "You can close this window and return to SheetMind.";
-  }} else {{
+    el("msg").textContent = msg || "This window will close automatically.";
+  }
+
+  function showError(msg) {
     el("spinner").style.display = "none";
     el("title").textContent = "Login failed";
     el("title").className = "error";
-    el("msg").textContent = "No tokens received. Please close this window and try again.";
-  }}
-}})();
+    el("msg").textContent = msg || "Please close this window and try again.";
+  }
+
+  function sendToOpener(payload) {
+    if (!window.opener) return false;
+    try {
+      // targetOrigin "*" is intentional: the GAS sidebar runs on a dynamic
+      // sandbox origin that cannot be predicted at serve time.
+      // The nonce mitigates this — the receiver verifies the nonce matches
+      // what it generated before accepting the payload.
+      window.opener.postMessage(payload, "*");
+      return true;
+    } catch(e) {
+      console.warn("SheetMind: Could not deliver payload to opener:", e);
+      return false;
+    }
+  }
+
+  if (error) {
+    var desc = errorDesc ? decodeURIComponent(errorDesc.replace(/\+/g, " ")) : error;
+    showError(desc);
+
+  } else if (code) {
+    // PKCE flow — send the authorization code to the opener for exchange
+    var sent = sendToOpener({ type: "sheetmind-oauth", code: code, nonce: nonce });
+    if (sent) {
+      showSuccess("This window will close automatically.");
+      setTimeout(function() { window.close(); }, 1500);
+    } else {
+      // No opener (popup was blocked, opened as tab)
+      showSuccess("You can close this window and return to SheetMind.");
+    }
+
+  } else if (accessToken) {
+    // Implicit flow fallback — send tokens directly
+    var sent = sendToOpener({
+      type: "sheetmind-oauth",
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      nonce: nonce
+    });
+    if (sent) {
+      showSuccess("This window will close automatically.");
+      setTimeout(function() { window.close(); }, 1500);
+    } else {
+      showSuccess("You can close this window and return to SheetMind.");
+    }
+
+  } else {
+    showError("No tokens received. Please close this window and try again.");
+  }
+})();
 </script>
 </body>
 </html>""",
       headers={
-          # Restrict what this page can load — inline scripts/styles only (needed for the
-          # spinner and token relay logic), nothing from external origins.
           "Content-Security-Policy": (
               "default-src 'none'; "
               "script-src 'unsafe-inline'; "
@@ -308,19 +401,48 @@ async def signin(body: SignInRequest, request: Request):
 @router.post("/callback")
 async def callback(body: TokenRequest, request: Request):
     """
-    Exchange Supabase tokens after OAuth redirect.
-    The frontend sends the access_token and refresh_token it received
-    from the URL hash after Google OAuth redirect.
-    Returns user info + tokens.
+    Exchange OAuth tokens after Google login.
+
+    Supports two flows:
+    - PKCE (preferred): body.code + body.nonce
+      Looks up the stored code_verifier by nonce and calls exchange_code_for_session.
+    - Implicit (fallback): body.access_token + body.refresh_token
+      Calls set_session directly.
+
+    Returns user info + fresh access/refresh tokens.
     """
     _check_auth_rate_limit(request, "callback")
     client = get_supabase_anon()
 
     try:
-        session = client.auth.set_session(body.access_token, body.refresh_token)
-        user = session.user
+        if body.code and body.nonce:
+            # PKCE flow — retrieve and consume the stored verifier
+            verifier = _pop_pkce_verifier(body.nonce)
+            if not verifier:
+                raise HTTPException(
+                    status_code=401,
+                    detail="OAuth session expired or invalid. Please try signing in again."
+                )
+            auth_response = client.auth.exchange_code_for_session({
+                "auth_code": body.code,
+                "code_verifier": verifier,
+            })
+            user = auth_response.user
+            session_obj = auth_response.session
 
-        if not user:
+        elif body.access_token:
+            # Implicit flow fallback
+            auth_response = client.auth.set_session(body.access_token, body.refresh_token)
+            user = auth_response.user
+            session_obj = auth_response.session
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide either code+nonce (PKCE) or access_token (implicit)."
+            )
+
+        if not user or not session_obj:
             raise HTTPException(status_code=401, detail="Invalid tokens")
 
         # Ensure user exists in our users table
@@ -343,9 +465,9 @@ async def callback(body: TokenRequest, request: Request):
 
         return {
             "user": user_record,
-            "access_token": session.session.access_token,
-            "refresh_token": session.session.refresh_token,
-            "expires_at": session.session.expires_at,
+            "access_token": session_obj.access_token,
+            "refresh_token": session_obj.refresh_token,
+            "expires_at": session_obj.expires_at,
         }
 
     except HTTPException:

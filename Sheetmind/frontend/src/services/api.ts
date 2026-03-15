@@ -260,15 +260,24 @@ export const authApi = {
   },
 
   /**
-   * Exchange OAuth tokens after redirect.
-   * Call with tokens from URL hash after Google OAuth redirect.
+   * Exchange OAuth result for tokens + user info.
+   *
+   * PKCE flow (preferred): pass code + nonce — backend exchanges using stored verifier.
+   * Implicit flow (fallback): pass accessToken + refreshToken directly.
    */
-  callback(accessToken: string, refreshToken: string): Promise<AuthResponse> {
+  callback(
+    accessToken?: string,
+    refreshToken?: string,
+    code?: string,
+    nonce?: string,
+  ): Promise<AuthResponse> {
     return request<AuthResponse>("/auth/callback", {
       method: "POST",
       body: JSON.stringify({
-        access_token: accessToken,
-        refresh_token: refreshToken,
+        access_token: accessToken || "",
+        refresh_token: refreshToken || "",
+        code: code || "",
+        nonce: nonce || "",
       }),
     });
   },
