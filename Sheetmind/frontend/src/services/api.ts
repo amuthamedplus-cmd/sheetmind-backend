@@ -27,8 +27,8 @@ import type {
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
-/** Default timeout for all API requests (60s — chat can take a while). */
-const REQUEST_TIMEOUT_MS = 60_000;
+/** Default timeout for all API requests (120s — agent queries with fallback can take a while). */
+const REQUEST_TIMEOUT_MS = 120_000;
 
 class ApiError extends Error {
   constructor(
