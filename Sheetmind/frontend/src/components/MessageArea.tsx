@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Message, StepAction, AgentReasoningStep } from "../types/api";
+import type { Message, StepAction, AgentReasoningStep, CritiqueResult, ProactiveInsights } from "../types/api";
 import ChartDisplay from "./ChartDisplay";
 import ClarificationCards from "./ClarificationCards";
 
@@ -493,6 +493,140 @@ function RAGBadge({ timing }: { timing?: { rag_ms?: number; agent_ms?: number; t
   );
 }
 
+// Speed badge — shows how fast the response was
+function SpeedBadge({ badge }: { badge: string }) {
+  const config: Record<string, { label: string; color: string; icon: string }> = {
+    instant: { label: "Instant", color: "text-emerald-600 bg-emerald-50 border-emerald-100", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
+    fast: { label: "Fast", color: "text-blue-600 bg-blue-50 border-blue-100", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
+    normal: { label: "Normal", color: "text-slate-500 bg-slate-50 border-slate-100", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+    thorough: { label: "Deep Analysis", color: "text-purple-600 bg-purple-50 border-purple-100", icon: "M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" },
+  };
+  const c = config[badge] || config.normal;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${c.color}`}>
+      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d={c.icon} />
+      </svg>
+      {c.label}
+    </span>
+  );
+}
+
+// Action summary badge — concise description of what was done
+function ActionSummaryBadge({ summary }: { summary: string }) {
+  return (
+    <div className="flex items-start gap-2 px-3 py-2 bg-gradient-to-r from-emerald-50 to-blue-50 rounded-xl border border-emerald-100/60 text-xs">
+      <svg className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <span className="text-slate-600 font-medium">{summary}</span>
+    </div>
+  );
+}
+
+// Critique warnings — shows issues found by the critique agent
+function CritiqueWarnings({ critique }: { critique: CritiqueResult }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!critique.critiques || critique.critiques.length === 0) return null;
+
+  const errorCount = critique.critiques.filter(c => c.severity === "error").length;
+  const warnCount = critique.critiques.filter(c => c.severity === "warning").length;
+  const sugCount = critique.critiques.filter(c => c.severity === "suggestion").length;
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className={`flex items-center gap-2 w-full text-left px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+          errorCount > 0
+            ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-100"
+            : warnCount > 0
+            ? "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-100"
+            : "bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-100"
+        }`}
+      >
+        <span>{errorCount > 0 ? "!" : warnCount > 0 ? "!" : "i"}</span>
+        <span>
+          Quality Check: {errorCount > 0 && `${errorCount} fixed`}
+          {warnCount > 0 && `${errorCount > 0 ? ", " : ""}${warnCount} warning${warnCount > 1 ? "s" : ""}`}
+          {sugCount > 0 && `${errorCount + warnCount > 0 ? ", " : ""}${sugCount} tip${sugCount > 1 ? "s" : ""}`}
+        </span>
+        <span className={`ml-auto transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}>▶</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-1.5 space-y-1 animate-fade-in-up">
+          {critique.critiques.map((c, i) => (
+            <div
+              key={i}
+              className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs ${
+                c.severity === "error" ? "bg-red-50/60 border border-red-100" :
+                c.severity === "warning" ? "bg-amber-50/60 border border-amber-100" :
+                "bg-blue-50/60 border border-blue-100"
+              }`}
+            >
+              <span className="flex-shrink-0 mt-0.5">
+                {c.severity === "error" ? "!" : c.severity === "warning" ? "!" : "i"}
+              </span>
+              <div>
+                <p className={`font-medium ${
+                  c.severity === "error" ? "text-red-700" :
+                  c.severity === "warning" ? "text-amber-700" : "text-blue-700"
+                }`}>{c.issue}</p>
+                <p className="text-slate-500 mt-0.5">{c.fix}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Data insights panel — proactive observations about the data
+function DataInsightsPanel({ insights }: { insights: ProactiveInsights }) {
+  const hasContent = (insights.insights?.length > 0) ||
+    (insights.data_warnings?.length > 0);
+
+  if (!hasContent) return null;
+
+  return (
+    <div className="mt-2 pt-2 border-t border-slate-50">
+      {/* Data insights */}
+      {insights.insights && insights.insights.length > 0 && (
+        <div className="space-y-1 mb-2">
+          {insights.insights.map((insight, i) => (
+            <div key={i} className="flex items-start gap-2 px-2.5 py-1.5 bg-blue-50/40 rounded-lg text-xs">
+              <svg className="w-3 h-3 text-blue-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-slate-600">{insight.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Data quality warnings */}
+      {insights.data_warnings && insights.data_warnings.length > 0 && (
+        <div className="space-y-1">
+          {insights.data_warnings.map((warning, i) => (
+            <div key={i} className="flex items-start gap-2 px-2.5 py-1.5 bg-amber-50/40 rounded-lg text-xs">
+              <svg className="w-3 h-3 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <span className="text-amber-700 font-medium">{warning.column}:</span>{" "}
+                <span className="text-slate-600">{warning.issue}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageArea({ messages, isLoading, error, responseTime, onUndo, onQuickAction, onClarificationSelect }: MessageAreaProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [loadingStartTime, setLoadingStartTime] = useState(() => Date.now());
@@ -579,10 +713,18 @@ function MessageArea({ messages, isLoading, error, responseTime, onUndo, onQuick
               </div>
             )}
 
-            {/* RAG indicator */}
-            {msg.role === "assistant" && msg.used_rag && (
-              <div className="mb-3 pb-2 border-b border-slate-50">
-                <RAGBadge timing={msg.agent_timing} />
+            {/* RAG indicator + Speed badge */}
+            {msg.role === "assistant" && (msg.used_rag || msg.speed_badge) && (
+              <div className="mb-3 pb-2 border-b border-slate-50 flex items-center gap-2 flex-wrap">
+                {msg.used_rag && <RAGBadge timing={msg.agent_timing} />}
+                {msg.speed_badge && <SpeedBadge badge={msg.speed_badge} />}
+              </div>
+            )}
+
+            {/* Action summary badge */}
+            {msg.role === "assistant" && msg.action_summary && (
+              <div className="mb-3">
+                <ActionSummaryBadge summary={msg.action_summary} />
               </div>
             )}
 
@@ -644,6 +786,16 @@ function MessageArea({ messages, isLoading, error, responseTime, onUndo, onQuick
                     )}
                   </div>
                 )}
+                {/* Critique warnings */}
+                {msg.critique && msg.critique.critiques.length > 0 && (
+                  <CritiqueWarnings critique={msg.critique} />
+                )}
+
+                {/* Data insights */}
+                {msg.data_insights && (
+                  <DataInsightsPanel insights={msg.data_insights} />
+                )}
+
                 {/* Undo button */}
                 {msg.undoInfo && !msg.undone && onUndo && (
                   <button

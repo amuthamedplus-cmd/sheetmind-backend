@@ -247,6 +247,41 @@ export interface ActionVerification {
   verification: "PASSED" | "PASSED_WITH_FIXES" | "NEEDS_REVIEW";
 }
 
+// Critique Agent types
+export interface CritiqueItem {
+  step: number;
+  severity: "error" | "warning" | "suggestion";
+  issue: string;
+  fix: string;
+  action: string;
+}
+
+export interface CritiqueResult {
+  critiques: CritiqueItem[];
+  issues_found: number;
+  auto_fixes: { step: number; fix: string; reason: string }[];
+  has_errors: boolean;
+  has_warnings: boolean;
+}
+
+export interface DataInsight {
+  text: string;
+  icon?: string;
+  type?: string;
+}
+
+export interface DataWarning {
+  column: string;
+  issue: string;
+  impact: string;
+}
+
+export interface ProactiveInsights {
+  insights: DataInsight[];
+  suggestions: string[];
+  data_warnings: DataWarning[];
+}
+
 export interface ChatResponse {
   conversation_id: string;
   message_id: string;
@@ -270,6 +305,13 @@ export interface ChatResponse {
   clarification?: Clarification | null;
   // Follow-up suggestions
   followup_suggestions?: QuickAction[] | null;
+  // Critique Agent
+  critique?: CritiqueResult | null;
+  // Proactive data insights
+  data_insights?: ProactiveInsights | null;
+  // Response enhancements
+  action_summary?: string | null;
+  speed_badge?: "instant" | "fast" | "normal" | "thorough" | null;
 }
 
 export interface UndoInfo {
@@ -304,6 +346,13 @@ export interface Message {
   clarificationAnswered?: boolean;
   // Follow-up suggestions
   followup_suggestions?: QuickAction[];
+  // Critique Agent
+  critique?: CritiqueResult;
+  // Proactive data insights
+  data_insights?: ProactiveInsights;
+  // Response enhancements
+  action_summary?: string;
+  speed_badge?: "instant" | "fast" | "normal" | "thorough";
 }
 
 export interface ConversationListResponse {

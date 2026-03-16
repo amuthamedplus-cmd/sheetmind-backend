@@ -25,6 +25,7 @@ class RequestType(str, Enum):
     SIMPLE_QUESTION = "simple_question"      # Just answer, no sheet actions
     GROUPED_SUMMARY = "grouped_summary"       # Sum/count/avg by category
     GROUPED_SUMMARY_CHART = "grouped_summary_chart"  # Same with chart
+    ADD_TO_EXISTING = "add_to_existing"      # Add column/data to an existing sheet
     TOP_N = "top_n"                          # Top/bottom N values
     FIND_DUPLICATES = "find_duplicates"      # Find duplicate rows
     FILTER_HIGHLIGHT = "filter_highlight"    # Filter and highlight
@@ -48,6 +49,10 @@ class ClassifiedRequest:
     custom_plan: Optional[List[Dict]] = None
     answer: Optional[str] = None       # for simple questions
     summary_sheet: Optional[str] = None  # sheet name where chart exists
+    target_sheet: Optional[str] = None   # existing sheet to modify (for add_to_existing)
+    new_column_header: Optional[str] = None  # header for the new column
+    new_column_formula: Optional[str] = None  # formula/value for the new column
+    existing_headers: Optional[List[str]] = None  # headers already in the target sheet
 
 
 # =============================================================================
@@ -138,6 +143,73 @@ def template_grouped_summary_chart(
     })
 
     return actions
+
+
+def template_add_column_to_existing(
+    target_sheet: str,
+    source_sheet: str,
+    last_row: int,
+    new_header: str,
+    group_by_col: str,
+    value_col: str,
+    aggregation: str = "sum",
+    existing_col_count: int = 2,
+    unique_count: int = 10,
+) -> List[Dict]:
+    """
+    Template for adding a column to an existing summary sheet.
+    Instead of recreating the sheet, just adds the new column.
+    """
+    # The new column letter (after existing columns)
+    new_col_letter = chr(ord('A') + existing_col_count)
+    fill_down_row = 1 + unique_count
+
+    # Choose formula based on aggregation type
+    if aggregation == "count":
+        formula = f"=COUNTIF('{source_sheet}'!{group_by_col}2:{group_by_col}{last_row}, A2)"
+    elif aggregation == "avg":
+        formula = f"=AVERAGEIF('{source_sheet}'!{group_by_col}2:{group_by_col}{last_row}, A2, '{source_sheet}'!{value_col}2:{value_col}{last_row})"
+    elif aggregation == "max":
+        formula = f"=MAXIFS('{source_sheet}'!{value_col}2:{value_col}{last_row}, '{source_sheet}'!{group_by_col}2:{group_by_col}{last_row}, A2)"
+    elif aggregation == "min":
+        formula = f"=MINIFS('{source_sheet}'!{value_col}2:{value_col}{last_row}, '{source_sheet}'!{group_by_col}2:{group_by_col}{last_row}, A2)"
+    else:  # sum
+        formula = f"=SUMIF('{source_sheet}'!{group_by_col}2:{group_by_col}{last_row}, A2, '{source_sheet}'!{value_col}2:{value_col}{last_row})"
+
+    agg_upper = aggregation.upper()
+
+    return [
+        # Set the new header
+        {
+            "action": "setValues",
+            "sheet": target_sheet,
+            "range": f"{new_col_letter}1:{new_col_letter}1",
+            "values": [[f"{agg_upper} of {new_header}"]],
+        },
+        # Format the new header to match
+        {
+            "action": "formatRange",
+            "sheet": target_sheet,
+            "range": f"{new_col_letter}1:{new_col_letter}1",
+            "bold": True,
+            "background": "#4472C4",
+            "fontColor": "#FFFFFF",
+        },
+        # Set formula in the first data cell
+        {
+            "action": "setFormula",
+            "sheet": target_sheet,
+            "cell": f"{new_col_letter}2",
+            "formula": formula,
+        },
+        # Fill down to match existing data
+        {
+            "action": "autoFillDown",
+            "sheet": target_sheet,
+            "sourceCell": f"{new_col_letter}2",
+            "lastRow": fill_down_row,
+        },
+    ]
 
 
 def template_multi_value_summary_chart(
@@ -354,11 +426,16 @@ Classify into ONE of these types:
 1. simple_question - User just wants information, no sheet modifications needed
 2. grouped_summary - Sum/count/avg by category (e.g., "sum of sales by region")
 3. grouped_summary_chart - Same as above but with chart (e.g., "chart of sales by region")
-4. top_n - Find top/bottom N values (e.g., "top 5 products by sales")
-5. find_duplicates - Find duplicate rows. Include "duplicate_columns" (list of column letters to check, or null for all columns)
-6. filter_highlight - Filter and highlight rows
-7. complex - Anything else that needs custom handling
-8. change_chart_type - User refers to an existing chart and wants a different chart type. Include "chart_type" and "summary_sheet" (the sheet name from conversation history where the chart was created).
+4. add_to_existing - User wants to ADD a column, modify, or extend something that was ALREADY created in a previous turn. Look for [ACTIONS PERFORMED] in conversation history. Include "target_sheet" (existing sheet name), "new_column_header", and optionally "value_column" (source data column letter), "aggregation".
+5. top_n - Find top/bottom N values (e.g., "top 5 products by sales")
+6. find_duplicates - Find duplicate rows. Include "duplicate_columns" (list of column letters to check, or null for all columns)
+7. filter_highlight - Filter and highlight rows
+8. complex - Anything else that needs custom handling
+9. change_chart_type - User refers to an existing chart and wants a different chart type. Include "chart_type" and "summary_sheet" (the sheet name from conversation history where the chart was created).
+
+IMPORTANT: If the conversation history contains [ACTIONS PERFORMED] showing that a sheet was already created,
+and the user asks to "add a column", "also include", "add another", "also show", etc.,
+classify as "add_to_existing" — NOT as grouped_summary (which would recreate from scratch).
 
 RESPOND IN EXACT JSON FORMAT:
 {{
@@ -498,6 +575,12 @@ class SmartExecutor:
             actions, chart_config = self._execute_grouped_summary_chart(classified, sheet_metadata, cells or {})
             response = f"Created summary with {classified.chart_type} chart."
 
+        elif classified.request_type == RequestType.ADD_TO_EXISTING:
+            actions = self._execute_add_to_existing(classified, sheet_metadata, history)
+            col_name = classified.new_column_header or classified.value_column or "new column"
+            target = classified.target_sheet or "existing sheet"
+            response = f"Added '{col_name}' column to {target}."
+
         elif classified.request_type == RequestType.CHANGE_CHART_TYPE:
             actions, chart_config = self._execute_change_chart_type(classified, sheet_metadata, cells or {})
             response = f"Changed chart to {classified.chart_type or 'line'}."
@@ -635,6 +718,9 @@ class SmartExecutor:
                 custom_plan=data.get('plan'),
                 answer=data.get('answer'),
                 summary_sheet=data.get('summary_sheet'),
+                target_sheet=data.get('target_sheet'),
+                new_column_header=data.get('new_column_header'),
+                new_column_formula=data.get('new_column_formula'),
             )
 
         except Exception as e:
@@ -729,6 +815,121 @@ class SmartExecutor:
         )
 
         return actions, chart_config
+
+    def _execute_add_to_existing(
+        self,
+        classified: ClassifiedRequest,
+        metadata: Dict,
+        history: list = None,
+    ) -> List[Dict]:
+        """Add a column to an existing summary sheet. Returns actions list."""
+        target_sheet = classified.target_sheet
+        source_sheet = metadata.get('sheet_name', 'Sheet1')
+        last_row = metadata.get('last_row', 100)
+
+        # If no target sheet specified, try to extract from history
+        if not target_sheet and history:
+            target_sheet = self._extract_existing_sheet_from_history(history)
+
+        if not target_sheet:
+            logger.warning("add_to_existing: no target sheet found, falling back to complex")
+            return []
+
+        # Determine new column details
+        value_col = classified.value_column
+        new_header = classified.new_column_header
+        aggregation = classified.aggregation or 'sum'
+
+        # If value_column not specified, try to infer from metadata
+        if not value_col and new_header:
+            for col in metadata.get('columns', []):
+                if col.get('header', '').lower() == new_header.lower():
+                    value_col = col.get('letter')
+                    break
+
+        if not value_col:
+            # Use first suggested aggregate column
+            suggested = metadata.get('suggested_aggregate', [])
+            if suggested:
+                value_col = suggested[0]
+            else:
+                logger.warning("add_to_existing: no value column found")
+                return []
+
+        if not new_header:
+            # Use the header of the value column
+            for col in metadata.get('columns', []):
+                if col.get('letter') == value_col:
+                    new_header = col.get('header', value_col)
+                    break
+            if not new_header:
+                new_header = value_col
+
+        # Count existing columns in target sheet from history
+        existing_col_count = self._count_existing_columns_from_history(history, target_sheet)
+
+        # Get group_by column (column A in summary sheet references this)
+        group_by_col = classified.group_by_column
+        if not group_by_col:
+            suggested_group = metadata.get('suggested_group_by', [])
+            group_by_col = suggested_group[0] if suggested_group else 'A'
+
+        # Get unique count for fill-down
+        unique_count = 10
+        for col in metadata.get('columns', []):
+            if col.get('letter') == group_by_col:
+                unique_count = col.get('unique_count', 10)
+                break
+
+        return template_add_column_to_existing(
+            target_sheet=target_sheet,
+            source_sheet=source_sheet,
+            last_row=last_row,
+            new_header=new_header,
+            group_by_col=group_by_col,
+            value_col=value_col,
+            aggregation=aggregation,
+            existing_col_count=existing_col_count,
+            unique_count=unique_count,
+        )
+
+    def _extract_existing_sheet_from_history(self, history: list) -> Optional[str]:
+        """Extract the name of a previously created sheet from conversation history."""
+        if not history:
+            return None
+
+        # Look for [ACTIONS PERFORMED] markers in assistant messages (newest first)
+        for msg in reversed(history):
+            if msg.get("role") != "assistant":
+                continue
+            content = msg.get("content", "")
+            # Parse [ACTIONS PERFORMED: Created sheets: Region Summary | ...]
+            match = re.search(r'\[ACTIONS PERFORMED:.*?Created sheets:\s*([^|^\]]+)', content)
+            if match:
+                sheet_name = match.group(1).strip().rstrip(',').strip()
+                if sheet_name:
+                    return sheet_name
+        return None
+
+    def _count_existing_columns_from_history(self, history: list, target_sheet: str) -> int:
+        """Count how many columns exist in the target sheet based on history markers."""
+        if not history:
+            return 2  # default: assume group column + 1 value column
+
+        for msg in reversed(history):
+            if msg.get("role") != "assistant":
+                continue
+            content = msg.get("content", "")
+            # Parse headers info: "SheetName headers: ['Col1', 'Col2', ...]"
+            pattern = re.escape(target_sheet) + r"\s+headers:\s*\[([^\]]+)\]"
+            match = re.search(pattern, content)
+            if match:
+                headers_str = match.group(1)
+                # Count comma-separated items
+                headers = [h.strip().strip("'\"") for h in headers_str.split(",")]
+                return len(headers)
+
+        return 2  # default assumption
 
     def _execute_change_chart_type(
         self,

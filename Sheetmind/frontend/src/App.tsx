@@ -445,6 +445,11 @@ function App() {
             pii_warning: res.pii_warning ?? undefined,
             clarification: res.clarification ?? undefined,
             followup_suggestions: res.followup_suggestions ?? undefined,
+            // Critique & enhancements
+            critique: res.critique ?? undefined,
+            data_insights: res.data_insights ?? undefined,
+            action_summary: res.action_summary ?? undefined,
+            speed_badge: res.speed_badge ?? undefined,
           };
           setMessages((prev) => [...prev, assistantMessage]);
 
@@ -470,6 +475,11 @@ function App() {
             pii_warning: res.pii_warning ?? undefined,
             clarification: res.clarification ?? undefined,
             followup_suggestions: res.followup_suggestions ?? undefined,
+            // Critique & enhancements
+            critique: res.critique ?? undefined,
+            data_insights: res.data_insights ?? undefined,
+            action_summary: res.action_summary ?? undefined,
+            speed_badge: res.speed_badge ?? undefined,
           };
           setMessages((prev) => [...prev, assistantMessage]);
         }

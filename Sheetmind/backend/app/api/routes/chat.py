@@ -23,6 +23,8 @@ from app.services.usage import check_limit, increment_usage, check_and_increment
 from app.services.rate_limiter import check_rate_limit
 from app.services.cache import get_cached, set_cached
 from app.services.profiler import StepTimer
+from app.services.critique_agent import critique_and_fix_actions, generate_proactive_insights
+from app.services.response_enhancer import enhance_response
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +300,66 @@ def _generate_quick_actions(sheet_data: dict | None, sheet_name: str | None) -> 
     ))
 
     return actions[:5]  # Limit to 5 suggestions
+
+
+def _build_action_summary(actions: list) -> str:
+    """Build a concise summary of sheet actions for conversation history.
+
+    This summary is appended to assistant messages so that on follow-up
+    requests the agent knows what was previously created/modified.
+    """
+    if not actions:
+        return ""
+
+    sheets_created = []
+    columns_added = []
+    formulas_set = []
+    charts_created = []
+    formats_applied = []
+
+    for a in actions:
+        act = a.get("action", "") if isinstance(a, dict) else ""
+        if act == "createSheet":
+            sheets_created.append(a.get("name", "?"))
+        elif act == "setValues":
+            sheet = a.get("sheet", "")
+            rng = a.get("range", "")
+            vals = a.get("values", [])
+            # Extract header names from first row if it's a header set
+            if vals and rng.endswith("1"):
+                headers = vals[0] if isinstance(vals[0], list) else vals
+                columns_added.append(f"{sheet} headers: {headers}")
+        elif act == "setFormula":
+            sheet = a.get("sheet", "")
+            cell = a.get("cell", "")
+            formulas_set.append(f"{sheet}!{cell}")
+        elif act == "insertColumn":
+            header = a.get("header", "?")
+            after = a.get("after", "?")
+            columns_added.append(f"Inserted column '{header}' after {after}")
+        elif act == "createChart":
+            chart_type = a.get("chartType", "chart")
+            data_sheet = a.get("dataSheet", "")
+            charts_created.append(f"{chart_type} on {data_sheet}")
+        elif act in ("formatRange", "conditionalFormat"):
+            formats_applied.append(a.get("range", ""))
+
+    parts = []
+    if sheets_created:
+        parts.append(f"Created sheets: {', '.join(sheets_created)}")
+    if columns_added:
+        parts.append(f"Columns: {'; '.join(columns_added)}")
+    if formulas_set:
+        parts.append(f"Formulas set in: {', '.join(formulas_set)}")
+    if charts_created:
+        parts.append(f"Charts: {', '.join(charts_created)}")
+    if formats_applied:
+        parts.append(f"Formatted: {', '.join(formats_applied[:5])}")
+
+    if not parts:
+        return ""
+
+    return "\n\n[ACTIONS PERFORMED: " + " | ".join(parts) + "]"
 
 
 def _persist_chat(
@@ -937,12 +999,19 @@ async def chat_query(
     # Generate a message ID client-side so we don't wait for the DB insert
     message_id = str(uuid.uuid4())
 
+    # Build action summary to persist with the response so follow-up requests
+    # know what was previously created (sheets, columns, formulas, charts)
+    action_summary = ""
+    if steps:
+        raw_actions = [s.action for s in steps if s.action]
+        action_summary = _build_action_summary(raw_actions)
+
     # Persist messages + usage in background (non-blocking)
     loop.run_in_executor(
         _bg_executor,
         _persist_chat,
         sb, conversation_id, user_id, request.message,
-        ai_response, None, sources_json,
+        ai_response + action_summary, None, sources_json,
     )
 
     # Await chart result if we started generation
@@ -970,6 +1039,45 @@ async def chat_query(
             steps = extracted_steps
             logger.info(f"Fallback parser extracted {len(steps)} actions from text response")
 
+    # ===== CRITIQUE AGENT: Review & auto-fix actions before execution =====
+    critique_result = None
+    proactive_insights = None
+    if steps:
+        timer.start("critique")
+        raw_actions = [s.action for s in steps if s.action]
+        fixed_actions, critique_result = critique_and_fix_actions(raw_actions, sheet_metadata)
+
+        # If critique auto-fixed actions (e.g., removed bad fillDown), rebuild steps
+        if critique_result and critique_result.auto_fixes:
+            steps = [
+                StepAction(
+                    step=i + 1,
+                    description=a.get("action", "Action"),
+                    action=a,
+                    formula=a.get("formula"),
+                    about=a.get("about"),
+                )
+                for i, a in enumerate(fixed_actions)
+            ]
+            logger.info(f"Critique auto-fixed {len(critique_result.auto_fixes)} action(s)")
+
+        # Generate proactive insights about the data
+        proactive_insights = generate_proactive_insights(
+            sheet_metadata or {}, request.message, raw_actions,
+        )
+        timer.stop("critique")
+
+    # ===== RESPONSE ENHANCER: Add smart suggestions & polish =====
+    timer.start("enhance")
+    enhancements = enhance_response(
+        ai_response=ai_response,
+        actions=[s.action for s in steps] if steps else [],
+        metadata=sheet_metadata,
+        timing=agent_timing,
+        user_message=request.message,
+    )
+    timer.stop("enhance")
+
     # Phase 4: Generate quick actions on first message (no conversation yet, skip for greetings)
     quick_actions = None
     if not request.conversation_id and effective_sheet_data and not is_greeting:
@@ -983,6 +1091,15 @@ async def chat_query(
         ai_response, followups = _extract_followup_suggestions(ai_response)
         if followups:
             followup_suggestions = followups
+
+    # Use enhanced follow-up suggestions if available (smarter, context-aware)
+    enhanced_suggestions = enhancements.get("followup_suggestions")
+    if enhanced_suggestions and steps:
+        # Convert enhanced suggestions to QuickAction format
+        followup_suggestions = [
+            QuickAction(label=s["label"], prompt=s["prompt"])
+            for s in enhanced_suggestions
+        ]
 
     # Detect clarification questions in AI response
     clarification = None
@@ -1015,6 +1132,13 @@ async def chat_query(
         "clarification": clarification,
         # Follow-up suggestions
         "followup_suggestions": [s.model_dump() for s in followup_suggestions] if followup_suggestions else None,
+        # Critique Agent results
+        "critique": critique_result.to_dict() if critique_result else None,
+        # Proactive data insights
+        "data_insights": proactive_insights if proactive_insights else None,
+        # Response enhancements
+        "action_summary": enhancements.get("action_summary"),
+        "speed_badge": enhancements.get("speed_badge"),
     }
 
     if profile:

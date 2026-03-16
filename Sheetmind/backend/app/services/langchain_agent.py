@@ -50,6 +50,16 @@ When users ask for grouped summaries (sum by X, count by Y, etc.), you MUST:
 3. Add SUMIF/COUNTIF formulas for aggregation
 4. DO NOT just calculate and return text answers
 
+**CRITICAL: FOLLOW-UP & INCREMENTAL MODIFICATIONS**
+When the user asks to modify, add to, or update something that was ALREADY CREATED in a previous turn:
+- CHECK the conversation history for [ACTIONS PERFORMED] markers — they tell you exactly what sheets/columns were created before
+- If a sheet was already created (e.g., "Region Summary"), do NOT create it again — MODIFY it instead
+- To ADD a column to an existing sheet: use insert_column + set_cell_value + auto_fill_down
+- To ADD a column to an existing summary sheet: use set_values for the new header, set_formula for the new column, autoFillDown
+- NEVER recreate a table/sheet from scratch when the user just wants to add/change one thing
+- Examples of follow-up requests: "add a Status column", "also include profit", "add another column for average", "change the header"
+- For these, identify what already exists and make ONLY the incremental change
+
 You have access to tools that let you read sheet data and create execution plans.
 
 AVAILABLE TOOLS:
@@ -132,6 +142,14 @@ When adding new calculated columns to the CURRENT/ACTIVE sheet:
 Step 1: insert_column to add the column (e.g., {{"after": "E", "header": "Total"}})
 Step 2: set_cell_value for the formula in the first data row (e.g., {{"cell": "F2", "value": "=D2+E2"}})
 Step 3: Use auto_fill_down to fill the formula down (e.g., {{"sheet": "{sheet_name}", "sourceCell": "F2", "lastRow": {last_row}}})
+
+ADDING A COLUMN TO AN EXISTING SUMMARY SHEET (follow-up request):
+When user says "add a column" or "also include X" and a summary sheet already exists:
+Step 1: get_headers on the summary sheet to see what columns exist
+Step 2: set_values to add the new header (e.g., {{"sheet": "Region Summary", "range": "C1:C1", "values": [["AVG of Price"]]}})
+Step 3: set_formula for the new column data (e.g., {{"sheet": "Region Summary", "cell": "C2", "formula": "=AVERAGEIF(...)"}})
+Step 4: autoFillDown: {{"sheet": "Region Summary", "sourceCell": "C2", "lastRow": fillDownLastRow}}
+DO NOT call create_sheet again — the sheet already exists!
 
 GROUPED SUMMARY WITH CHART WORKFLOW:
 Step 1: lookup_formula("sum by category") to get the correct formula pattern
