@@ -194,10 +194,11 @@ def check_limit(user_id: str, tier: str = "free") -> None:
 
 def increment_usage(user_id: str, usage_type: str) -> None:
     """
-    Atomically increment a usage counter for the current period.
+    Increment a usage counter for the current period.
 
-    Uses upsert with ON CONFLICT to avoid the read-then-write race condition
-    that could lose increments under concurrent requests.
+    Strategy:
+    1. Try atomic RPC (increment_usage_counter) — fastest, fully atomic.
+    2. Fall back to select-then-update if RPC is not deployed.
 
     Args:
         user_id: The user's UUID string.
@@ -208,37 +209,10 @@ def increment_usage(user_id: str, usage_type: str) -> None:
     sb = get_supabase()
     period = _get_current_period()
 
-    # Atomic upsert: INSERT or UPDATE in a single query.
-    # If a record for (user_id, period) already exists, increment the column.
-    # If not, create a new record with the column set to 1.
-    # This uses Supabase's PostgREST upsert with on_conflict.
-    new_record = {
-        "user_id": user_id,
-        "period": period,
-        "query_count": 0,
-        "formula_count": 0,
-        "chat_count": 0,
-    }
-    new_record[usage_type] = 1
-
     try:
-        # Try upsert — requires a UNIQUE constraint on (user_id, period)
-        sb.table("usage_records") \
-            .upsert(new_record, on_conflict="user_id,period") \
-            .execute()
-
-        # The upsert above sets the count to 1 on conflict (overwrites).
-        # We need to ADD 1 instead. Since PostgREST upsert can't do
-        # "SET col = col + 1", we follow up with an atomic increment via RPC.
-        # However, if RPC isn't available, fall back to the increment approach.
-        #
-        # Use raw SQL increment via PostgREST's rpc() if available,
-        # otherwise fall back to select-then-update with optimistic concurrency.
         _atomic_increment(sb, user_id, period, usage_type)
     except Exception as e:
-        # Fallback: the upsert may have failed if there's no unique constraint.
-        # Use the select-then-update approach.
-        logger.warning(f"Upsert failed, using fallback increment: {e}")
+        logger.warning(f"Atomic increment failed, using fallback: {e}")
         try:
             _fallback_increment(sb, user_id, period, usage_type)
         except Exception as fallback_err:
