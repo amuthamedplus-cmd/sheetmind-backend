@@ -28,9 +28,16 @@ async def health_check():
 
 
 def _check_supabase() -> str:
-    """Synchronous Supabase connectivity check (runs in thread pool)."""
+    """Synchronous Supabase connectivity check with write to prevent free-tier pause.
+
+    Supabase free tier pauses databases after 7 days of inactivity.
+    A read-only SELECT may not count as "activity", so we upsert a
+    heartbeat row into the `keepalive` table to ensure real write traffic.
+    """
     sb = get_supabase()
-    sb.table("users").select("id").limit(1).execute()
+    sb.table("keepalive").upsert(
+        {"id": 1, "last_ping": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+    ).execute()
     return "connected"
 
 
@@ -103,3 +110,25 @@ async def health_check_db(x_health_key: Optional[str] = Header(default=None)):
         content["elapsed_ms"] = elapsed_ms
 
     return JSONResponse(status_code=status_code, content=content)
+
+
+@router.api_route("/health/keepalive", methods=["GET", "HEAD"])
+async def keepalive():
+    """Lightweight endpoint for UptimeRobot to prevent Supabase free-tier pause.
+
+    Writes a heartbeat row to the keepalive table so Supabase registers
+    real write activity. Returns 200 on success, 503 on failure.
+    """
+    loop = asyncio.get_event_loop()
+    try:
+        await asyncio.wait_for(
+            loop.run_in_executor(None, _check_supabase),
+            timeout=_CHECK_TIMEOUT,
+        )
+        return {"status": "alive", "db": "pinged"}
+    except Exception as e:
+        logger.warning(f"Keepalive ping failed: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "failed", "error": str(e)},
+        )
