@@ -27,8 +27,6 @@ import type {
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
-/** Default timeout for all API requests (120s — agent queries with fallback can take a while). */
-const REQUEST_TIMEOUT_MS = 120_000;
 
 class ApiError extends Error {
   constructor(
@@ -105,10 +103,7 @@ async function request<T>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  // Abort on timeout to prevent indefinite hangs
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
+  // No timeout — let the request complete however long it takes
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}${path}`, {
@@ -117,16 +112,9 @@ async function request<T>(
         ...(options.headers as Record<string, string>),
       },
       ...options,
-      signal: controller.signal,
     });
   } catch (err) {
-    clearTimeout(timeoutId);
-    if (err instanceof DOMException && err.name === "AbortError") {
-      throw new ApiError(0, "Request timed out. Please try again.");
-    }
     throw new ApiError(0, "Network error. Please check your connection.");
-  } finally {
-    clearTimeout(timeoutId);
   }
 
   // On 401, try refreshing the token once, then retry
