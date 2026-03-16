@@ -23,7 +23,10 @@ from app.services.usage import check_limit, increment_usage, check_and_increment
 from app.services.rate_limiter import check_rate_limit
 from app.services.cache import get_cached, set_cached
 from app.services.profiler import StepTimer
-from app.services.critique_agent import critique_and_fix_actions, generate_proactive_insights
+from app.services.critique_agent import (
+    critique_and_fix_actions, generate_proactive_insights,
+    critique_and_clean_response,
+)
 from app.services.response_enhancer import enhance_response
 
 logger = logging.getLogger(__name__)
@@ -824,10 +827,12 @@ async def chat_query(
             logger.info(f"   Type: {smart_result.get('request_type')}")
 
         else:
-            # ===== FALLBACK: Full ReAct Agent (10-15 LLM calls) =====
+            # ===== FALLBACK: Full ReAct Agent (6-10 LLM calls) =====
             try:
                 session_id = str(request.conversation_id) if request.conversation_id else str(uuid.uuid4())
 
+                # Pass precomputed metadata to avoid redundant analyze_sheet()
+                _precomputed = metadata_dict if 'metadata_dict' in dir() else None
                 agent_result = await loop.run_in_executor(
                     _bg_executor,
                     lambda: get_agent(session_id).run(
@@ -835,6 +840,7 @@ async def chat_query(
                         sheet_data=effective_sheet_data,
                         sheet_name=effective_sheet_name,
                         history=history,
+                        precomputed_metadata=_precomputed,
                     ),
                 )
 
@@ -1039,16 +1045,44 @@ async def chat_query(
             steps = extracted_steps
             logger.info(f"Fallback parser extracted {len(steps)} actions from text response")
 
-    # ===== CRITIQUE AGENT: Review & auto-fix actions before execution =====
+    # ===== CRITIQUE AGENT v2: Review, auto-fix, quality-check, score =====
     critique_result = None
     proactive_insights = None
+    critique_score = None
+    is_react_result = (
+        agent_timing and agent_timing.get("mode") != "smart"
+        and steps is not None
+    )
     if steps:
         timer.start("critique")
         raw_actions = [s.action for s in steps if s.action]
-        fixed_actions, critique_result = critique_and_fix_actions(raw_actions, sheet_metadata)
 
-        # If critique auto-fixed actions (e.g., removed bad fillDown), rebuild steps
-        if critique_result and critique_result.auto_fixes:
+        # Determine existing sheets for accurate missing-sheet-reference check
+        existing_sheets = []
+        if request.sheets:
+            existing_sheets = [
+                s if isinstance(s, str) else s.get("name", str(s))
+                for s in request.sheets
+            ]
+
+        # Full critique v2 pipeline
+        critique_output = critique_and_clean_response(
+            ai_response=ai_response,
+            actions=raw_actions,
+            user_message=request.message,
+            metadata=sheet_metadata,
+            existing_sheets=existing_sheets,
+            is_react=bool(is_react_result),
+        )
+
+        # Apply results
+        ai_response = critique_output["response"]
+        fixed_actions = critique_output["actions"]
+        critique_result = critique_output["critique_result"]
+        critique_score = critique_output.get("score")
+
+        # Rebuild steps if actions were modified
+        if fixed_actions != raw_actions:
             steps = [
                 StepAction(
                     step=i + 1,
@@ -1059,11 +1093,14 @@ async def chat_query(
                 )
                 for i, a in enumerate(fixed_actions)
             ]
-            logger.info(f"Critique auto-fixed {len(critique_result.auto_fixes)} action(s)")
+            logger.info(f"Critique v2: actions modified ({len(raw_actions)} -> {len(fixed_actions)})")
+
+        if critique_score:
+            logger.info(f"Critique v2 score: {critique_score.get('score', '?')}/10")
 
         # Generate proactive insights about the data
         proactive_insights = generate_proactive_insights(
-            sheet_metadata or {}, request.message, raw_actions,
+            sheet_metadata or {}, request.message, fixed_actions,
         )
         timer.stop("critique")
 
@@ -1134,6 +1171,8 @@ async def chat_query(
         "followup_suggestions": [s.model_dump() for s in followup_suggestions] if followup_suggestions else None,
         # Critique Agent results
         "critique": critique_result.to_dict() if critique_result else None,
+        # Critique v2 quality score
+        "critique_score": critique_score if critique_score else None,
         # Proactive data insights
         "data_insights": proactive_insights if proactive_insights else None,
         # Response enhancements

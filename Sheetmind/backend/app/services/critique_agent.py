@@ -1,5 +1,5 @@
 """
-Critique Agent — Reviews AI responses before they reach the user.
+Critique Agent v2 — Reviews AI responses before they reach the user.
 
 This agent acts as a quality gate that:
 1. Validates formulas in the action plan
@@ -7,10 +7,13 @@ This agent acts as a quality gate that:
 3. Suggests better alternatives (faster formulas, simpler approaches)
 4. Generates proactive insights about the data
 5. Adds smart follow-up suggestions
-
-The critique runs in parallel with response assembly to avoid blocking.
+6. [v2] Response quality checks (filler stripping, verbosity, terse responses)
+7. [v2] Enhanced action validation (redundant actions, column refs, sheet refs)
+8. [v2] Intent-match scoring
+9. [v2] Self-critique via LLM (ReAct only, low scores)
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -55,6 +58,35 @@ _FORMULA_ISSUES = [
         "severity": "suggestion",
     },
 ]
+
+# ---------------------------------------------------------------------------
+# Filler Phrases (compiled once)
+# ---------------------------------------------------------------------------
+
+_FILLER_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in [
+        r"^I'?d be happy to help[.!]?\s*",
+        r"^Sure[!,]\s*",
+        r"^Of course[!,]\s*",
+        r"^Great question[!,]\s*",
+        r"^Absolutely[!,]\s*",
+        r"^Certainly[!,]\s*",
+        r"^No problem[!,]\s*",
+        r"^Let me help you with that[.!]?\s*",
+        r"^I can help with that[.!]?\s*",
+        r"^Here'?s what I (?:did|can do)[.!:]\s*",
+    ]
+]
+
+_TRAILING_FILLER = re.compile(
+    r"\s*(?:Is there anything else (?:you'?d like|I can help with|you need)\??|"
+    r"Let me know if you (?:need|want) anything else[.!]?|"
+    r"Feel free to ask if you have (?:any )?(?:more )?questions[.!]?|"
+    r"Hope this helps[.!]?|"
+    r"Happy to help further[.!]?)\s*$",
+    re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Data Insight Patterns
@@ -105,8 +137,13 @@ _INSIGHT_TEMPLATES = [
 class CritiqueAgent:
     """Reviews and enhances AI responses before delivery."""
 
-    def __init__(self, metadata: Optional[Dict] = None):
+    def __init__(
+        self,
+        metadata: Optional[Dict] = None,
+        existing_sheets: Optional[List[str]] = None,
+    ):
         self.metadata = metadata or {}
+        self.existing_sheets = existing_sheets or []
         self.critiques: List[Dict] = []
         self.insights: List[Dict] = []
         self.suggestions: List[str] = []
@@ -194,11 +231,120 @@ class CritiqueAgent:
                                 "action": act_type,
                             })
 
+        # --- v2: Enhanced action validation ---
+        self._check_redundant_actions(actions)
+        self._check_column_references(actions)
+        self._check_range_boundaries(actions)
+        self._check_missing_sheet_references(actions)
+
         return CritiqueResult(
             critiques=self.critiques,
             issues_found=issues_found,
             auto_fixes=auto_fixes,
         )
+
+    # --- v2: Enhanced action validation methods ---
+
+    def _check_redundant_actions(self, actions: List[Dict]):
+        """Detect redundant actions (same cell set then overwritten)."""
+        cell_setters: Dict[str, int] = {}  # "sheet!cell" -> step index
+        for i, action in enumerate(actions):
+            act_type = action.get("action", "")
+            if act_type in ("setFormula", "setValues"):
+                sheet = action.get("sheet", "")
+                cell = action.get("cell", "")
+                if cell:
+                    key = f"{sheet}!{cell}"
+                    if key in cell_setters:
+                        self.critiques.append({
+                            "step": cell_setters[key] + 1,
+                            "severity": "warning",
+                            "issue": f"Cell {cell} is set in step {cell_setters[key]+1} but overwritten in step {i+1}",
+                            "fix": "Remove the earlier action since it will be overwritten",
+                            "action": act_type,
+                        })
+                    cell_setters[key] = i
+
+    def _check_column_references(self, actions: List[Dict]):
+        """Check if formula references columns beyond sheet boundaries."""
+        if not self.metadata:
+            return
+        known_cols = {c.get("letter", "") for c in self.metadata.get("columns", [])}
+        if not known_cols:
+            return
+
+        max_col = max(known_cols) if known_cols else "Z"
+
+        for i, action in enumerate(actions):
+            if action.get("action") != "setFormula":
+                continue
+            formula = action.get("formula", "")
+            # Find column references like A2, Z100, etc. in the formula
+            col_refs = re.findall(r"(?<![A-Z])([A-Z])(?=\d)", formula)
+            for col in col_refs:
+                if col > max_col:
+                    self.critiques.append({
+                        "step": i + 1,
+                        "severity": "error",
+                        "issue": f"Formula references column {col} but sheet only has columns up to {max_col}",
+                        "fix": f"Check column reference — sheet columns are A-{max_col}",
+                        "action": "setFormula",
+                    })
+
+    def _check_range_boundaries(self, actions: List[Dict]):
+        """Warn if formula ranges extend far beyond actual data."""
+        if not self.metadata:
+            return
+        last_row = self.metadata.get("last_row", 0)
+        if last_row <= 0:
+            return
+
+        for i, action in enumerate(actions):
+            if action.get("action") != "setFormula":
+                continue
+            formula = action.get("formula", "")
+            # Find range endpoints like A1000, B5000
+            range_ends = re.findall(r"[A-Z]+(\d+)\)", formula)
+            for end_str in range_ends:
+                end_row = int(end_str)
+                if end_row > last_row * 10 and end_row > last_row + 100:
+                    self.critiques.append({
+                        "step": i + 1,
+                        "severity": "warning",
+                        "issue": f"Range extends to row {end_row} but data ends at row {last_row}",
+                        "fix": f"Use row {last_row} as the range end for efficiency",
+                        "action": "setFormula",
+                    })
+
+    def _check_missing_sheet_references(self, actions: List[Dict]):
+        """Check if actions target sheets that don't exist and aren't created."""
+        # Collect sheets created by actions
+        created_sheets = set()
+        for action in actions:
+            if action.get("action") == "createSheet":
+                created_sheets.add(action.get("name", ""))
+
+        # Check if any action targets a non-existent sheet
+        for i, action in enumerate(actions):
+            target_sheet = action.get("sheet", "")
+            if not target_sheet:
+                continue
+            # Skip if it's the current sheet (from metadata)
+            current_sheet = self.metadata.get("sheet_name", "")
+            if target_sheet == current_sheet:
+                continue
+            # Skip if sheet exists or is being created
+            if target_sheet in created_sheets:
+                continue
+            if target_sheet in self.existing_sheets:
+                continue
+            self.critiques.append({
+                "step": i + 1,
+                "severity": "error",
+                "issue": f"Action targets sheet '{target_sheet}' which doesn't exist and isn't created",
+                "fix": f"Add a createSheet action for '{target_sheet}' or verify the sheet name",
+                "action": action.get("action", ""),
+            })
 
     def generate_insights(self) -> List[Dict]:
         """Generate proactive data insights based on sheet metadata."""
@@ -293,10 +439,20 @@ class CritiqueAgent:
         # Limit to 3 most relevant
         return self.suggestions[:3]
 
-    def critique_response_text(self, ai_response: str) -> List[Dict]:
+    def critique_response_text(
+        self,
+        ai_response: str,
+        actions: Optional[List[Dict]] = None,
+    ) -> List[Dict]:
         """
         Review the AI's text response for quality issues.
+
+        Args:
+            ai_response: The AI-generated text response.
+            actions: The list of sheet actions (fixes bug where empty [] was used).
         """
+        if actions is None:
+            actions = []
         text_issues = []
 
         # Check for vague/unhelpful responses
@@ -317,16 +473,262 @@ class CritiqueAgent:
         # Check for formula in text that should be an action
         formula_in_text = re.findall(r'=\w+\([^)]+\)', ai_response)
         if formula_in_text and not any(
-            a.get("action") == "setFormula"
-            for a in []  # placeholder — caller should pass actions
+            a.get("action") == "setFormula" for a in actions
         ):
             text_issues.append({
                 "severity": "suggestion",
-                "issue": f"Response contains formula(s) as text — consider executing them as actions",
+                "issue": "Response contains formula(s) as text — consider executing them as actions",
                 "context": formula_in_text[0][:80],
             })
 
         return text_issues
+
+    # --- v2: Response quality checker ---
+
+    def critique_response_quality(
+        self,
+        ai_response: str,
+        actions: List[Dict],
+    ) -> str:
+        """
+        Rule-based response quality check and cleanup (0 LLM calls).
+
+        - Strips filler phrases
+        - Trims verbose action responses (only if content is repetitive)
+        - Expands terse responses when actions exist
+        - Detects formulas in text without corresponding actions
+
+        Returns the cleaned response text.
+        """
+        text = ai_response
+
+        # 1. Strip leading filler phrases
+        for pat in _FILLER_PATTERNS:
+            text = pat.sub("", text, count=1)
+
+        # 2. Strip trailing filler
+        text = _TRAILING_FILLER.sub("", text)
+
+        text = text.strip()
+
+        # 3. Terse check: if actions exist but response is too short, auto-generate
+        if actions and len(text) < 15:
+            summary = _build_action_text_summary(actions)
+            if summary:
+                text = summary
+
+        # 4. Verbosity check: only truncate if response restates what actions convey
+        #    AND exceeds 600 chars. Never truncate warnings/caveats.
+        if actions and len(text) > 600:
+            text = _smart_truncate(text, actions)
+
+        return text
+
+    # --- v2: Intent-match scoring ---
+
+    def score_response(
+        self,
+        user_message: str,
+        ai_response: str,
+        actions: List[Dict],
+        request_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Score response quality 0-10 based on intent matching (not keyword overlap).
+
+        Scoring:
+        - Relevance (3x): Does the response type match what was asked?
+        - Completeness (3x): Are expected actions present?
+        - Conciseness (2x): Shorter is better for sidebar
+        - Actionability (2x): More actions relative to text = higher score
+
+        Returns dict with score, breakdown, and flags.
+        """
+        scores = {}
+        msg_lower = user_message.lower()
+
+        # --- Relevance (0-10, weight 3x) ---
+        relevance = 5  # baseline
+        if actions:
+            action_types = {a.get("action") for a in actions}
+            # Check if action types match intent
+            if any(w in msg_lower for w in ("sum", "total", "count", "average", "avg")):
+                if "setFormula" in action_types:
+                    relevance = 9
+            if any(w in msg_lower for w in ("chart", "graph", "plot", "visuali")):
+                if "createChart" in action_types:
+                    relevance = 9
+            if any(w in msg_lower for w in ("duplicate", "duplicates")):
+                if "formatRange" in action_types or "createSheet" in action_types:
+                    relevance = 9
+            if any(w in msg_lower for w in ("highlight", "color", "format")):
+                if "conditionalFormat" in action_types or "formatRange" in action_types:
+                    relevance = 9
+            if any(w in msg_lower for w in ("summary", "group", "by")):
+                if "createSheet" in action_types:
+                    relevance = 9
+        elif not actions:
+            # No actions — check if this was a question (expected no actions)
+            if "?" in user_message or any(w in msg_lower for w in ("what", "how", "why", "explain", "tell me")):
+                relevance = 7  # Q&A with no actions is fine
+            elif any(w in msg_lower for w in ("create", "make", "add", "sum", "count")):
+                relevance = 2  # User wanted actions but got none
+        scores["relevance"] = relevance
+
+        # --- Completeness (0-10, weight 3x) ---
+        completeness = 5
+        if actions:
+            has_chart = any(a.get("action") == "createChart" for a in actions)
+            has_formula = any(a.get("action") == "setFormula" for a in actions)
+            has_create_sheet = any(a.get("action") == "createSheet" for a in actions)
+
+            if any(w in msg_lower for w in ("chart", "graph", "plot")):
+                completeness = 9 if has_chart else 3
+            elif any(w in msg_lower for w in ("summary", "group")):
+                completeness = 9 if (has_create_sheet and has_formula) else 5
+            else:
+                completeness = 7  # has actions, seems reasonable
+        elif "?" in user_message:
+            # Q&A — completeness depends on response length
+            completeness = 7 if len(ai_response) > 30 else 4
+        scores["completeness"] = completeness
+
+        # --- Conciseness (0-10, weight 2x) ---
+        resp_len = len(ai_response)
+        if resp_len < 100:
+            conciseness = 9
+        elif resp_len < 300:
+            conciseness = 8
+        elif resp_len < 500:
+            conciseness = 6
+        elif resp_len < 800:
+            conciseness = 4
+        else:
+            conciseness = 2
+        scores["conciseness"] = conciseness
+
+        # --- Actionability (0-10, weight 2x) ---
+        if actions:
+            ratio = len(actions) / max(resp_len / 100, 1)
+            actionability = min(10, int(ratio * 3) + 4)
+        else:
+            actionability = 3 if "?" in user_message else 1
+        scores["actionability"] = actionability
+
+        # Weighted total (out of 10)
+        total = (
+            scores["relevance"] * 3 +
+            scores["completeness"] * 3 +
+            scores["conciseness"] * 2 +
+            scores["actionability"] * 2
+        ) / 10
+
+        return {
+            "score": round(total, 1),
+            "breakdown": scores,
+            "needs_critique": total < 7,
+        }
+
+    # --- v2: Self-critique via LLM ---
+
+    def self_critique(
+        self,
+        user_message: str,
+        ai_response: str,
+        actions: List[Dict],
+        score_result: Dict,
+    ) -> Dict[str, Any]:
+        """
+        Single LLM call to critique the response (ReAct only, score < 7).
+
+        Returns dict with:
+        - critique_text: What's wrong (or "LGTM")
+        - action: "suppress_actions" | "remove_action" | "add_note" | "lgtm"
+        - removed_indices: List of action indices to remove (if action == "remove_action")
+        - note: Text to append (if action == "add_note")
+        """
+        try:
+            from app.core.config import settings
+            if not settings.OPENROUTER_API_KEY:
+                return {"critique_text": "LGTM", "action": "lgtm"}
+
+            from langchain_openai import ChatOpenAI
+
+            llm = ChatOpenAI(
+                model="google/gemini-2.0-flash-001",
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url="https://openrouter.ai/api/v1",
+                temperature=0.0,
+                max_tokens=512,
+            )
+
+            actions_summary = json.dumps(
+                [{"action": a.get("action"), "cell": a.get("cell", ""), "formula": a.get("formula", "")[:80]}
+                 for a in actions[:10]],
+                indent=None,
+            )
+
+            prompt = f"""You are a quality reviewer for a Google Sheets AI assistant. Review this response.
+
+USER REQUEST: "{user_message}"
+
+AI RESPONSE: "{ai_response[:500]}"
+
+ACTIONS: {actions_summary}
+
+QUALITY SCORE: {score_result.get('score', 0)}/10
+
+Issues to check:
+1. Do the actions match what the user asked for?
+2. Are there formula errors (wrong column, wrong function)?
+3. Is the response misleading or incorrect?
+
+Reply with EXACTLY one of:
+- "LGTM" if the response is acceptable
+- "NOTE: <tip>" if the response is okay but could use a helpful tip
+- "SUPPRESS: <reason>" if the actions are wrong and should NOT be executed
+- "REMOVE <step_numbers>: <reason>" if specific action steps should be removed
+
+Reply:"""
+
+            result = llm.invoke(prompt)
+            critique_text = result.content.strip() if hasattr(result, "content") else str(result).strip()
+
+            if critique_text.startswith("LGTM"):
+                return {"critique_text": "LGTM", "action": "lgtm"}
+            elif critique_text.startswith("SUPPRESS"):
+                reason = critique_text.split(":", 1)[1].strip() if ":" in critique_text else "Quality check failed"
+                return {
+                    "critique_text": critique_text,
+                    "action": "suppress_actions",
+                    "note": f"Note: {reason}",
+                }
+            elif critique_text.startswith("REMOVE"):
+                # Parse "REMOVE 3,5: reason"
+                match = re.match(r"REMOVE\s+([\d,\s]+):\s*(.+)", critique_text)
+                if match:
+                    indices = [int(x.strip()) - 1 for x in match.group(1).split(",") if x.strip().isdigit()]
+                    reason = match.group(2).strip()
+                    return {
+                        "critique_text": critique_text,
+                        "action": "remove_action",
+                        "removed_indices": indices,
+                        "note": f"Removed step(s) {match.group(1).strip()}: {reason}",
+                    }
+                return {"critique_text": critique_text, "action": "lgtm"}
+            elif critique_text.startswith("NOTE"):
+                note = critique_text.split(":", 1)[1].strip() if ":" in critique_text else critique_text
+                return {
+                    "critique_text": critique_text,
+                    "action": "add_note",
+                    "note": note,
+                }
+            else:
+                return {"critique_text": critique_text, "action": "lgtm"}
+
+        except Exception as e:
+            logger.warning(f"Self-critique failed: {e}")
+            return {"critique_text": "LGTM", "action": "lgtm"}
 
 
 class CritiqueResult:
@@ -434,6 +836,7 @@ def generate_proactive_insights(
 def critique_and_fix_actions(
     actions: List[Dict],
     metadata: Optional[Dict] = None,
+    existing_sheets: Optional[List[str]] = None,
 ) -> tuple:
     """
     Run critique on actions, auto-fix what we can, return fixed actions + report.
@@ -441,7 +844,7 @@ def critique_and_fix_actions(
     Returns:
         (fixed_actions, critique_result)
     """
-    agent = CritiqueAgent(metadata)
+    agent = CritiqueAgent(metadata, existing_sheets=existing_sheets)
     result = agent.critique_actions(actions)
 
     if result.has_errors:
@@ -452,6 +855,82 @@ def critique_and_fix_actions(
         return fixed_actions, result
 
     return actions, result
+
+
+def critique_and_clean_response(
+    ai_response: str,
+    actions: List[Dict],
+    user_message: str,
+    metadata: Optional[Dict] = None,
+    existing_sheets: Optional[List[str]] = None,
+    is_react: bool = False,
+) -> Dict[str, Any]:
+    """
+    Full critique v2 pipeline: quality check + scoring + optional self-critique.
+
+    Returns:
+        {
+            "response": cleaned response text,
+            "actions": potentially modified actions list,
+            "critique_result": CritiqueResult from action validation,
+            "score": quality score dict,
+            "self_critique": self-critique result (if triggered),
+        }
+    """
+    agent = CritiqueAgent(metadata, existing_sheets=existing_sheets)
+
+    # 1. Critique actions (existing + new validations)
+    critique_result = agent.critique_actions(actions)
+    fixed_actions = actions
+    if critique_result.has_errors:
+        fixed_actions = critique_result.apply_auto_fixes(actions)
+
+    # 2. Critique response quality (rule-based, 0 LLM calls)
+    cleaned_response = agent.critique_response_quality(ai_response, fixed_actions)
+
+    # 3. Critique response text for issues
+    agent.critique_response_text(cleaned_response, fixed_actions)
+
+    # 4. Score response
+    score_result = agent.score_response(
+        user_message, cleaned_response, fixed_actions,
+    )
+
+    # 5. Self-critique via LLM (ReAct only, score < 7)
+    self_critique_result = None
+    if is_react and score_result.get("needs_critique") and fixed_actions:
+        self_critique_result = agent.self_critique(
+            user_message, cleaned_response, fixed_actions, score_result,
+        )
+
+        # Apply self-critique actions
+        if self_critique_result:
+            sc_action = self_critique_result.get("action", "lgtm")
+            if sc_action == "suppress_actions":
+                # Remove all actions, keep only text + note
+                fixed_actions = []
+                note = self_critique_result.get("note", "")
+                if note:
+                    cleaned_response = cleaned_response + "\n\n" + note
+            elif sc_action == "remove_action":
+                indices = set(self_critique_result.get("removed_indices", []))
+                if indices:
+                    fixed_actions = [a for i, a in enumerate(fixed_actions) if i not in indices]
+                note = self_critique_result.get("note", "")
+                if note:
+                    cleaned_response = cleaned_response + "\n\n" + note
+            elif sc_action == "add_note":
+                note = self_critique_result.get("note", "")
+                if note:
+                    cleaned_response = cleaned_response + "\n\n" + note
+
+    return {
+        "response": cleaned_response,
+        "actions": fixed_actions,
+        "critique_result": critique_result,
+        "score": score_result,
+        "self_critique": self_critique_result,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -470,3 +949,68 @@ def _expand_range(range_str: str) -> set:
         for row in range(int(start_row), int(end_row) + 1):
             cells.add(f"{chr(col_ord)}{row}")
     return cells
+
+
+def _build_action_text_summary(actions: List[Dict]) -> str:
+    """Build a human-readable summary from actions for terse responses."""
+    parts = []
+    sheets = set()
+    formulas = 0
+    charts = 0
+
+    for a in actions:
+        act = a.get("action", "")
+        if act == "createSheet":
+            sheets.add(a.get("name", "new sheet"))
+        elif act in ("setFormula", "autoFillDown"):
+            formulas += 1
+        elif act == "createChart":
+            charts += 1
+            parts.append(f"Created a {a.get('chartType', 'chart')} chart")
+        elif act == "conditionalFormat":
+            parts.append("Applied conditional formatting")
+
+    if sheets:
+        parts.insert(0, f"Created **{', '.join(sheets)}** sheet{'s' if len(sheets) > 1 else ''}")
+    if formulas:
+        parts.append(f"with {formulas} formula{'s' if formulas > 1 else ''}")
+
+    return " ".join(parts) + "." if parts else ""
+
+
+def _smart_truncate(text: str, actions: List[Dict]) -> str:
+    """Truncate response text only if it contains repetitive content.
+
+    Never truncate sentences containing warnings, caveats, or data quality notes.
+    """
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) <= 3:
+        return text
+
+    # Build a set of action-related keywords to detect repetition
+    action_keywords = set()
+    for a in actions:
+        if a.get("action") == "createSheet":
+            action_keywords.add(a.get("name", "").lower())
+        if a.get("formula"):
+            # Extract function names
+            funcs = re.findall(r"=(\w+)\(", a["formula"])
+            action_keywords.update(f.lower() for f in funcs)
+
+    # Classify sentences
+    keep = []
+    important_words = {"note", "warning", "caution", "empty", "null", "blank",
+                       "missing", "error", "careful", "however", "but", "although",
+                       "caveat", "important", "%"}
+
+    for sent in sentences:
+        sent_lower = sent.lower()
+        # Always keep sentences with warnings/caveats
+        if any(w in sent_lower for w in important_words):
+            keep.append(sent)
+            continue
+        # Keep first 3 non-repetitive sentences
+        if len(keep) < 3:
+            keep.append(sent)
+
+    return " ".join(keep)

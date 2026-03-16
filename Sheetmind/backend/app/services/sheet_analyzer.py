@@ -88,6 +88,36 @@ class SheetMetadata:
             "suggestedDateColumn": self.suggested_date_column,
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SheetMetadata":
+        """Reconstruct SheetMetadata from a dict (inverse of to_dict)."""
+        columns = []
+        for col_data in data.get("columns", []):
+            columns.append(ColumnMetadata(
+                letter=col_data.get("letter", ""),
+                header=col_data.get("header", ""),
+                column_type=col_data.get("type", "text"),
+                unique_count=col_data.get("uniqueCount", col_data.get("unique_count", 0)),
+                null_count=col_data.get("nullCount", col_data.get("null_count", 0)),
+                samples=col_data.get("samples", []),
+                min_value=col_data.get("min"),
+                max_value=col_data.get("max"),
+                avg_value=col_data.get("avg"),
+                sum_value=col_data.get("sum"),
+                categories=col_data.get("categories", []),
+            ))
+        return cls(
+            sheet_name=data.get("sheetName", data.get("sheet_name", "Sheet1")),
+            total_rows=data.get("totalRows", data.get("total_rows", 0)),
+            data_rows=data.get("dataRows", data.get("data_rows", 0)),
+            last_row=data.get("lastRow", data.get("last_row", 0)),
+            total_columns=data.get("totalColumns", data.get("total_columns", 0)),
+            columns=columns,
+            suggested_group_by=data.get("suggestedGroupBy", data.get("suggested_group_by", [])),
+            suggested_aggregate=data.get("suggestedAggregate", data.get("suggested_aggregate", [])),
+            suggested_date_column=data.get("suggestedDateColumn", data.get("suggested_date_column")),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Type Detection Helpers

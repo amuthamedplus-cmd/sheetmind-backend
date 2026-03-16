@@ -2,11 +2,12 @@
 Smart Executor - Hybrid approach for efficient sheet operations.
 
 Reduces LLM calls from 10-15 to 1-2 by:
-1. Classifying request type in one call
+1. Classifying request type in one call (with Redis caching)
 2. Using templates for known patterns (no additional LLM)
 3. Using plan+execute for complex requests (one additional LLM call)
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -15,6 +16,54 @@ from dataclasses import dataclass
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Classifier Cache (Redis-backed, 30 min TTL)
+# ---------------------------------------------------------------------------
+
+_CLASSIFIER_CACHE_TTL = 1800  # 30 minutes
+
+
+def _classifier_cache_key(request: str, headers: List[str], col_types: List[str]) -> str:
+    """Build a cache key from the request and sheet structure.
+
+    Numbers are preserved (not normalized) because they carry semantic meaning
+    (e.g., "top 5" vs "top 10").
+    """
+    normalized = request.lower().strip()
+    # Sort headers/types for stability
+    key_data = f"{normalized}|{'|'.join(sorted(headers))}|{'|'.join(sorted(col_types))}"
+    return f"classifier:{hashlib.sha256(key_data.encode()).hexdigest()[:24]}"
+
+
+def _get_cached_classification(cache_key: str) -> Optional[Dict]:
+    """Try to get a cached classification result from Redis."""
+    try:
+        from app.services.cache import _get_redis
+        r = _get_redis()
+        if r is None:
+            return None
+        data = r.get(cache_key)
+        if data:
+            logger.info(f"Classifier cache HIT: {cache_key[:20]}...")
+            return json.loads(data)
+    except Exception:
+        pass
+    return None
+
+
+def _set_cached_classification(cache_key: str, result: Dict):
+    """Cache a classification result in Redis."""
+    try:
+        from app.services.cache import _get_redis
+        r = _get_redis()
+        if r is None:
+            return
+        r.setex(cache_key, _CLASSIFIER_CACHE_TTL, json.dumps(result))
+        logger.info(f"Classifier cache SET: {cache_key[:20]}...")
+    except Exception:
+        pass
 
 
 # =============================================================================
@@ -486,11 +535,22 @@ class SmartExecutor:
         cells: Dict = None,
     ) -> ClassifiedRequest:
         """
-        Classify user request in ONE LLM call.
+        Classify user request in ONE LLM call (with Redis caching).
 
         Returns:
             ClassifiedRequest with type and extracted parameters
         """
+        # --- Phase 1B: Check classifier cache ---
+        headers = [c.get("header", "") for c in sheet_metadata.get("columns", [])]
+        col_types = [c.get("type", "") for c in sheet_metadata.get("columns", [])]
+        cache_key = _classifier_cache_key(user_request, headers, col_types)
+
+        cached = _get_cached_classification(cache_key)
+        if cached:
+            result = self._parse_classification_from_dict(cached)
+            logger.info(f"Classified request (CACHED) as: {result.request_type}")
+            return result
+
         # Format metadata for prompt
         metadata_str = self._format_metadata(sheet_metadata)
 
@@ -526,6 +586,16 @@ class SmartExecutor:
             # Parse JSON response
             result = self._parse_classification(response_text)
             logger.info(f"Classified request as: {result.request_type}")
+
+            # Cache the result (only for non-complex, non-history-dependent types)
+            if result.request_type not in (RequestType.COMPLEX, RequestType.ADD_TO_EXISTING, RequestType.CHANGE_CHART_TYPE):
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', response_text)
+                    if json_match:
+                        _set_cached_classification(cache_key, json.loads(json_match.group()))
+                except Exception:
+                    pass
+
             return result
 
         except Exception as e:
@@ -569,21 +639,21 @@ class SmartExecutor:
 
         elif classified.request_type == RequestType.GROUPED_SUMMARY:
             actions, chart_config = self._execute_grouped_summary(classified, sheet_metadata, cells or {})
-            response = f"Created summary of {classified.value_column} by {classified.group_by_column}."
+            response = self._build_smart_response(classified, sheet_metadata, "summary")
 
         elif classified.request_type == RequestType.GROUPED_SUMMARY_CHART:
             actions, chart_config = self._execute_grouped_summary_chart(classified, sheet_metadata, cells or {})
-            response = f"Created summary with {classified.chart_type} chart."
+            response = self._build_smart_response(classified, sheet_metadata, "summary_chart")
 
         elif classified.request_type == RequestType.ADD_TO_EXISTING:
             actions = self._execute_add_to_existing(classified, sheet_metadata, history)
             col_name = classified.new_column_header or classified.value_column or "new column"
             target = classified.target_sheet or "existing sheet"
-            response = f"Added '{col_name}' column to {target}."
+            response = f"Added **{col_name}** column to **{target}**."
 
         elif classified.request_type == RequestType.CHANGE_CHART_TYPE:
             actions, chart_config = self._execute_change_chart_type(classified, sheet_metadata, cells or {})
-            response = f"Changed chart to {classified.chart_type or 'line'}."
+            response = f"Changed chart to **{classified.chart_type or 'line'}**."
 
         elif classified.request_type == RequestType.FIND_DUPLICATES:
             actions, response, chart_config = self._execute_find_duplicates(classified, sheet_metadata, cells or {})
@@ -609,6 +679,60 @@ class SmartExecutor:
             "request_type": classified.request_type.value,
             "chart_config": chart_config,
         }
+
+    def _build_smart_response(
+        self,
+        classified: ClassifiedRequest,
+        metadata: Dict,
+        response_type: str,
+    ) -> str:
+        """Build a meaningful response using actual header names instead of column letters."""
+        # Resolve header names from metadata
+        group_header = classified.group_by_column or "category"
+        value_header = classified.value_column or "value"
+        agg = (classified.aggregation or "sum").upper()
+
+        for col in metadata.get("columns", []):
+            if col.get("letter") == classified.group_by_column:
+                group_header = col.get("header", group_header)
+            if col.get("letter") == classified.value_column:
+                value_header = col.get("header", value_header)
+
+        if response_type == "summary":
+            return f"Created a **{group_header} Summary** sheet with {agg} of **{value_header}** grouped by **{group_header}**."
+        elif response_type == "summary_chart":
+            chart = classified.chart_type or "bar"
+            return (
+                f"Created a **{group_header} Summary** sheet with {agg} of **{value_header}** "
+                f"grouped by **{group_header}**, plus a **{chart} chart**."
+            )
+        return f"Created summary of {value_header} by {group_header}."
+
+    def _parse_classification_from_dict(self, data: Dict) -> ClassifiedRequest:
+        """Build a ClassifiedRequest from a cached dict (no JSON parsing needed)."""
+        type_str = data.get("request_type", "complex")
+        try:
+            request_type = RequestType(type_str)
+        except ValueError:
+            request_type = RequestType.COMPLEX
+
+        return ClassifiedRequest(
+            request_type=request_type,
+            group_by_column=data.get("group_by_column"),
+            value_column=data.get("value_columns", [[]])[0][0] if data.get("value_columns") else data.get("value_column"),
+            aggregation=data.get("aggregation", "sum"),
+            chart_type=data.get("chart_type", "bar"),
+            n_value=data.get("n_value"),
+            filter_column=data.get("filter_column"),
+            filter_value=data.get("filter_value"),
+            duplicate_columns=data.get("duplicate_columns"),
+            custom_plan=data.get("plan"),
+            answer=data.get("answer"),
+            summary_sheet=data.get("summary_sheet"),
+            target_sheet=data.get("target_sheet"),
+            new_column_header=data.get("new_column_header"),
+            new_column_formula=data.get("new_column_formula"),
+        )
 
     def _format_metadata(self, metadata: Dict) -> str:
         """Format sheet metadata for prompt."""

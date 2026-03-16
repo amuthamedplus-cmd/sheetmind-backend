@@ -265,8 +265,8 @@ class SheetMindAgent:
             tools=ALL_TOOLS,
             memory=self.memory,
             verbose=settings.DEBUG,
-            max_iterations=15,  # Increased to allow chart creation after summary
-            max_execution_time=60,
+            max_iterations=10,  # Reduced from 15 — most tasks complete in 6-8 steps
+            max_execution_time=45,  # Reduced from 60s
             handle_parsing_errors=True,
             return_intermediate_steps=True,
         )
@@ -279,6 +279,7 @@ class SheetMindAgent:
         sheet_data: Optional[Dict] = None,
         sheet_name: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
+        precomputed_metadata: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with a user message.
@@ -319,10 +320,16 @@ class SheetMindAgent:
             cells = sheet_data["cells"]
 
             # === PRE-PROCESSING LAYER ===
-            # Analyze sheet structure BEFORE agent runs
+            # Use precomputed metadata if available (avoids redundant analysis)
             analysis_start = time.time()
-            metadata = analyze_sheet(cells, effective_sheet_name)
-            timing["analysis_ms"] = int((time.time() - analysis_start) * 1000)
+            if precomputed_metadata:
+                metadata = SheetMetadata.from_dict(precomputed_metadata)
+                timing["analysis_ms"] = 0
+                timing["analysis_skipped"] = True
+                logger.info("Using precomputed metadata — skipped analyze_sheet()")
+            else:
+                metadata = analyze_sheet(cells, effective_sheet_name)
+                timing["analysis_ms"] = int((time.time() - analysis_start) * 1000)
 
             # Extract key values for prompt
             last_row = metadata.last_row
@@ -432,8 +439,8 @@ class SheetMindAgent:
                         tools=ALL_TOOLS,
                         memory=self.memory,
                         verbose=settings.DEBUG,
-                        max_iterations=15,
-                        max_execution_time=60,
+                        max_iterations=10,
+                        max_execution_time=45,
                         handle_parsing_errors=True,
                         return_intermediate_steps=True,
                     )
@@ -444,9 +451,19 @@ class SheetMindAgent:
                     raise
             timing["agent_ms"] = int((time.time() - agent_start) * 1000)
 
+            # Loop detection: log if agent called same tool with same input twice
+            intermediate = result.get("intermediate_steps", [])
+            if len(intermediate) >= 2:
+                prev_calls = set()
+                for action_obj, _ in intermediate:
+                    call_key = f"{action_obj.tool}:{str(action_obj.tool_input)[:100]}"
+                    if call_key in prev_calls:
+                        logger.warning(f"Loop detected: agent called {action_obj.tool} with same input twice")
+                    prev_calls.add(call_key)
+
             # Extract reasoning steps from intermediate_steps
             reasoning = []
-            for i, (action, observation) in enumerate(result.get("intermediate_steps", [])):
+            for i, (action, observation) in enumerate(intermediate):
                 # Parse thought from action log
                 thought = ""
                 if hasattr(action, 'log'):
@@ -491,7 +508,7 @@ class SheetMindAgent:
             error_str = str(e)
 
             # Distinguish timeout/iteration limits from other errors
-            if elapsed >= 58:  # Close to max_execution_time=60
+            if elapsed >= 43:  # Close to max_execution_time=45
                 logger.error(f"Agent TIMEOUT for session {self.session_id} after {elapsed:.1f}s: {e}")
                 user_msg = "This request took too long. Try a simpler question or smaller dataset."
             elif "max iterations" in error_str.lower() or "iteration limit" in error_str.lower():
