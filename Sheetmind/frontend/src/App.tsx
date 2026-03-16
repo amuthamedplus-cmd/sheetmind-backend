@@ -7,7 +7,7 @@ import {
   identifyUser, startSession, trackMessageSent, trackMessageReceived,
   trackMessageError, trackStepsExecuted, trackUndoPerformed, trackQuickActionUsed,
   trackModeChanged, trackSheetChanged, trackNewChatStarted, trackConversationLoaded,
-  trackConversationDeleted, trackPricingPageViewed, trackPricingPlanSelected,
+  trackConversationDeleted, trackPricingPageViewed,
 } from "./services/analytics";
 import type { Message, SheetAction, StepAction, HistoryMessage, QuickAction, ChatMode, SheetInfo, UndoInfo, ConversationListResponse, User } from "./types/api";
 
